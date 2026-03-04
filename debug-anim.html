@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Animation Debug</title>
+<style>
+body{background:#111;color:#aaffaa;font-family:monospace;padding:20px;font-size:13px;}
+h2{color:#ffee88;}h3{color:#88ddff;margin-top:20px;}
+.ok{color:#44ff88;}.err{color:#ff4444;}.warn{color:#ffaa44;}
+pre{background:#0a0a0a;padding:10px;overflow-x:auto;line-height:1.6;}
+</style>
+</head>
+<body>
+<h2>Animation Debug Tool</h2>
+<p>Put this file in the SAME folder as horror-fps.html (next to Zombie.fbm folder). Then run via local server.</p>
+<div id="out"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const PATHS={zombie:'Zombie.fbm/Zombie.fbx',walkAnim:'Zombie.fbm/characters3d.com - Walk Forward.fbx'};
+const out=document.getElementById('out');
+function log(msg,cls=''){console.log(msg);const p=document.createElement('div');p.className=cls;p.textContent=msg;out.appendChild(p);}
+function logh(msg){const h=document.createElement('h3');h.textContent=msg;out.appendChild(h);}
+function logpre(s){const pre=document.createElement('pre');pre.textContent=s;out.appendChild(pre);}
+async function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
+async function main(){
+  log('Loading FBX parser...');
+  await loadScript('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/libs/fflate.min.js');
+  await loadScript('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/FBXLoader.js');
+  log('FBX parser ready','ok');
+  const loader=new THREE.FBXLoader();
+
+  logh('1. ZOMBIE.FBX');
+  let zombie;
+  try{zombie=await new Promise((res,rej)=>loader.load(PATHS.zombie,res,undefined,rej));log('Loaded OK','ok');}
+  catch(e){log('ERROR: '+e.message,'err');return;}
+  log('Zombie anims: '+zombie.animations.length);
+  zombie.animations.forEach((a,i)=>log('  ['+i+']: "'+a.name+'" dur='+a.duration.toFixed(2)+'s tracks='+a.tracks.length));
+
+  logh('All named objects in Zombie (type + name):');
+  const allNames=[];
+  zombie.traverse(o=>{if(o.name)allNames.push('['+o.type+'] '+o.name);});
+  logpre(allNames.join('\n'));
+
+  logh('2. WALK FBX');
+  let walkFBX;
+  try{walkFBX=await new Promise((res,rej)=>loader.load(PATHS.walkAnim,res,undefined,rej));log('Loaded OK','ok');}
+  catch(e){log('ERROR: '+e.message,'err');return;}
+  log('Walk anims: '+walkFBX.animations.length);
+  walkFBX.animations.forEach((a,i)=>{
+    log('  ['+i+']: "'+a.name+'" dur='+a.duration.toFixed(2)+'s tracks='+a.tracks.length);
+    a.tracks.slice(0,6).forEach(t=>log('    track: '+t.name));
+  });
+
+  logh('3. BONE NAME MATCH TEST');
+  const walkClip=walkFBX.animations.find(a=>/walk/i.test(a.name))||walkFBX.animations[walkFBX.animations.length-1];
+  log('Testing clip: "'+walkClip.name+'"');
+  const zombieNames=new Set();
+  zombie.traverse(o=>{if(o.name)zombieNames.add(o.name);});
+  let matched=0,unmatched=0;
+  const unmatchedList=[];
+  walkClip.tracks.forEach(track=>{
+    const dot=track.name.lastIndexOf('.');
+    const boneName=dot>=0?track.name.substring(0,dot):track.name;
+    if(zombieNames.has(boneName))matched++;
+    else{unmatched++;if(unmatchedList.length<8)unmatchedList.push('MISS: track="'+track.name+'" bone="'+boneName+'"');}
+  });
+  log('Matched: '+matched+'/'+walkClip.tracks.length,matched>0?'ok':'err');
+  unmatchedList.forEach(m=>log(m,'warn'));
+
+  logh('4. LIVE TEST - do bones actually move?');
+  const mixer=new THREE.AnimationMixer(zombie);
+  const action=mixer.clipAction(walkClip);
+  action.play();
+  mixer.update(0.5);
+  let moved=false;
+  zombie.traverse(o=>{
+    if((o.isBone||o.type==='Bone')&&(Math.abs(o.rotation.x)>.001||Math.abs(o.rotation.y)>.001||Math.abs(o.rotation.z)>.001))moved=true;
+  });
+  log('Bones moved after mixer.update(0.5): '+moved,moved?'ok':'err');
+  if(!moved)log('=> Track names do NOT match bone names in zombie skeleton','err');
+
+  logh('COMPLETE - share these results to fix the animation');
+}
+main().catch(e=>{log('Fatal: '+e.message,'err');console.error(e);});
+</script>
+</body>
+</html>

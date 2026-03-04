@@ -1,0 +1,470 @@
+{
+  "accessors": [
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        702.5286865234375,
+        2065.5263671875,
+        596.6446533203125
+      ],
+      "min": [
+        -723.0164184570313,
+        -0.29657092690467834,
+        -672.0300903320313
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 29904,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        0.9857600331306458,
+        0.9999977946281433,
+        0.9599637389183044
+      ],
+      "min": [
+        -0.9852339029312134,
+        -0.6600645184516907,
+        -0.9999995231628418
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        0.9997829794883728,
+        0.9265045523643494,
+        0.9999675750732422,
+        1.0
+      ],
+      "min": [
+        -0.999997079372406,
+        -0.9225851893424988,
+        -0.9999066591262817,
+        1.0
+      ],
+      "type": "VEC4"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        1.9799400568008423,
+        19.913179397583008
+      ],
+      "min": [
+        -0.9935972094535828,
+        -0.9686579704284668
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 19936,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        1.9799400568008423,
+        19.913179397583008
+      ],
+      "min": [
+        -0.9935972094535828,
+        -0.9686579704284668
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 39872,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        1.0,
+        0.998076319694519
+      ],
+      "min": [
+        1.0,
+        0.4730078876018524
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 59808,
+      "componentType": 5126,
+      "count": 2492,
+      "max": [
+        1.9799400568008423,
+        19.913179397583008
+      ],
+      "min": [
+        -0.9935972094535828,
+        -0.9686579704284668
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "componentType": 5125,
+      "count": 9804,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 59808,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        778.2284545898438,
+        2086.450439453125,
+        664.2018432617188
+      ],
+      "min": [
+        -799.0968017578125,
+        154.7948455810547,
+        -753.7481079101563
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "byteOffset": 284160,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        0.9998394846916199,
+        0.9999867677688599,
+        0.9999253153800964
+      ],
+      "min": [
+        -0.9998398423194885,
+        -0.013605666346848011,
+        -0.9999194741249084
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 79744,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        0.9280898571014404,
+        1.0
+      ],
+      "min": [
+        0.12808987498283386,
+        0.0
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 229312,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        0.9280898571014404,
+        1.0
+      ],
+      "min": [
+        0.12808987498283386,
+        0.0
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 378880,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        1.0,
+        0.998076319694519
+      ],
+      "min": [
+        1.0,
+        0.9946621060371399
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 1,
+      "byteOffset": 528448,
+      "componentType": 5126,
+      "count": 18696,
+      "max": [
+        0.9280898571014404,
+        1.0
+      ],
+      "min": [
+        0.12808987498283386,
+        0.0
+      ],
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 0,
+      "byteOffset": 39216,
+      "componentType": 5125,
+      "count": 46740,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "extras": {
+      "author": "MD Umair Khan (https://sketchfab.com/MD_Umair)",
+      "license": "SKETCHFAB Standard (https://sketchfab.com/licenses)",
+      "source": "https://sketchfab.com/3d-models/pine-tree-fbx-4k-d49a2457ef5c4622b2f36521ef5e2ec3",
+      "title": "Pine Tree (FBX 4K)"
+    },
+    "generator": "Sketchfab-16.75.0",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 226176,
+      "name": "floatBufferViews",
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 678016,
+      "byteOffset": 226176,
+      "byteStride": 8,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 508512,
+      "byteOffset": 904192,
+      "byteStride": 12,
+      "name": "floatBufferViews",
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 39872,
+      "byteOffset": 1412704,
+      "byteStride": 16,
+      "name": "floatBufferViews",
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 1452576,
+      "uri": "scene.bin"
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/pine_bark_diff_4k_Mat_baseColor.jpeg"
+    },
+    {
+      "uri": "textures/pine_bark_diff_4k_Mat_metallicRoughness.png"
+    },
+    {
+      "uri": "textures/pine_bark_diff_4k_Mat_normal.jpeg"
+    },
+    {
+      "uri": "textures/Pine_Texture_2_Mat_baseColor.png"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "pine_bark_diff_4k_Mat",
+      "normalTexture": {
+        "index": 2
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicFactor": 0.0,
+        "metallicRoughnessTexture": {
+          "index": 1
+        }
+      }
+    },
+    {
+      "alphaMode": "MASK",
+      "doubleSided": true,
+      "name": "Pine_Texture_2_Mat",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 3
+        },
+        "metallicFactor": 0.0,
+        "roughnessFactor": 0.75
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "pine_bark_diff_4k_pine_bark_diff_4k_Mat_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 1,
+            "POSITION": 0,
+            "TANGENT": 2,
+            "TEXCOORD_0": 3,
+            "TEXCOORD_1": 4,
+            "TEXCOORD_2": 5,
+            "TEXCOORD_3": 6
+          },
+          "indices": 7,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    },
+    {
+      "name": "Pine_Texture_2_Pine_Texture_2_Mat_0",
+      "primitives": [
+        {
+          "attributes": {
+            "NORMAL": 9,
+            "POSITION": 8,
+            "TEXCOORD_0": 10,
+            "TEXCOORD_1": 11,
+            "TEXCOORD_2": 12,
+            "TEXCOORD_3": 13
+          },
+          "indices": 14,
+          "material": 1,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "matrix": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.220446049250313e-16,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Sketchfab_model"
+    },
+    {
+      "children": [
+        2
+      ],
+      "matrix": [
+        0.009999999776482582,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.009999999776482582,
+        0.0,
+        0.0,
+        -0.009999999776482582,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "Pine Tree G.fbx"
+    },
+    {
+      "children": [
+        3
+      ],
+      "name": "RootNode"
+    },
+    {
+      "children": [
+        4,
+        6
+      ],
+      "name": "Pine_Tree_G"
+    },
+    {
+      "children": [
+        5
+      ],
+      "name": "pine_bark_diff_4k"
+    },
+    {
+      "mesh": 0,
+      "name": "pine_bark_diff_4k_pine_bark_diff_4k_Mat_0"
+    },
+    {
+      "children": [
+        7
+      ],
+      "name": "Pine_Texture_2"
+    },
+    {
+      "mesh": 1,
+      "name": "Pine_Texture_2_Pine_Texture_2_Mat_0"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Sketchfab_Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    },
+    {
+      "sampler": 0,
+      "source": 3
+    }
+  ]
+}
