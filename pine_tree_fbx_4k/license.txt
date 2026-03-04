@@ -1,0 +1,8 @@
+Model Information:
+* title:	Pine Tree (FBX 4K)
+* source:	https://sketchfab.com/3d-models/pine-tree-fbx-4k-d49a2457ef5c4622b2f36521ef5e2ec3
+* author:	MD Umair Khan (https://sketchfab.com/MD_Umair)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works
