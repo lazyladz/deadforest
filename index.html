@@ -102,7 +102,7 @@ canvas{display:block;}
 
 <!-- Loading screen -->
 <div id="loading">
-  <div class="ltxt">DEMO PANI</div>
+  <div class="ltxt">DEMO SAMPLE 3%</div>
   <div id="lbar"><div id="lfill"></div></div>
   <div id="lsub">LOADING...</div>
   <div id="lerr"></div>
@@ -130,14 +130,31 @@ canvas{display:block;}
     <div id="sbar"><div id="sfill" style="width:100%"></div></div>
   </div>
   <div id="aw"><div id="anum">12</div><div id="albl">ROUNDS</div></div>
-  <div id="wmsg">-- WAVE 1 --</div>
+  <!-- Boss health bar (hidden until boss spawns) -->
+<div id="bossHud" style="display:none;position:fixed;top:64px;left:50%;transform:translateX(-50%);
+  z-index:12;text-align:center;pointer-events:none;">
+  <div style="font-family:'Orbitron',monospace;font-size:11px;letter-spacing:5px;
+    color:#ff4444;text-shadow:0 0 12px rgba(255,50,50,.5);margin-bottom:5px;" id="bossName">
+    ⚠ BOSS ⚠
+  </div>
+  <div style="width:280px;height:10px;background:rgba(0,0,0,.6);
+    border:1px solid rgba(255,60,60,.4);border-radius:2px;overflow:hidden;">
+    <div id="bossHpFill" style="height:100%;width:100%;
+      background:linear-gradient(90deg,#880000,#ff2222);
+      border-radius:2px;transition:width .15s;
+      box-shadow:0 0 8px rgba(255,0,0,.4);"></div>
+  </div>
+  <div id="bossHpText" style="font-family:'Orbitron',monospace;font-size:10px;
+    letter-spacing:3px;color:rgba(255,100,100,.7);margin-top:3px;">80 / 80</div>
+</div>
+<div id="wmsg">-- WAVE 1 --</div>
   <div id="rui"><span>RELOADING</span><div id="rtrack"><div id="rprog"></div></div></div>
   <div id="flw"><div id="fldot"></div><span>LIGHT [F]</span></div>
 </div>
 
 <!-- Start screen -->
 <div id="ls">
-  <div class="ttl">DEMO = 3%/100</div>
+  <div class="ttl">DEMO SAMPLE 3%</div>
   <div class="sub">THEY HAVE RISEN</div>
   <button class="btn" id="ebtn">ENTER</button>
   <div id="hint">
@@ -195,6 +212,9 @@ const PATHS = {
   damageAnim:   'Zombie.fbm/characters3d_com_-_Zombie_Damage.fbx',
   rockBoulder:  'rock_boulder_2_game_ready_asset.glb',
   damageAnim:   'characters3d_com_-_Zombie_Damage.fbx',
+  bossModel:    'Walking.fbx',
+  bossPunch:    'Mutant_Punch.fbx',
+  bossSwipe:    'Mutant_Swiping.fbx',
 };
 
 // =====================================================
@@ -242,6 +262,16 @@ let groundAlbedoTex = null;
 let groundNormalTex = null;
 let grassTemplate = null;        // loaded GLTF grass scene
 let mTO=null, hmTO=null;
+
+// ── BOSS STATE ─────────────────────────────────────────────────────
+let bossTemplate   = null;
+let bossPunchClip  = null;
+let bossSwipeClip  = null;
+let bossWalkClip   = null;
+let bossActive     = false;
+let bossData       = null; // single boss object
+const BOSS_WAVE    = 3;    // boss spawns every 3rd wave
+const BOSS_HP_BASE = 80;
 let fpsHistory=[], lastFPSTime=performance.now(), fpsFrames=0;
 
 // DOM refs
@@ -510,7 +540,50 @@ async function boot() {
     }
   } catch(e) { console.warn('Damage anim failed:', e.message); }
 
-  setLoad(88, 'Building world...');
+  // ── Load boss assets ──────────────────────────────────────────────
+  setLoad(88, 'Loading boss model...');
+  try {
+    const bossFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossModel);
+    // Scale boss to ~3 units tall (bigger than zombie ~2.2)
+    const bBox = new THREE.Box3().setFromObject(bossFBX);
+    const bH   = bBox.max.y - bBox.min.y;
+    bossFBX.scale.setScalar(3.0 / Math.max(bH, 0.01));
+    const bBox2 = new THREE.Box3().setFromObject(bossFBX);
+    bossFBX.position.y = -bBox2.min.y;
+    bossFBX.traverse(c => {
+      if (!c.isMesh) return;
+      c.castShadow = true; c.receiveShadow = true;
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m => {
+        // Keep original materials intact
+        if (m.map) m.map.encoding = THREE.sRGBEncoding;
+        m.needsUpdate = true;
+      });
+    });
+    bossTemplate = bossFBX;
+    // Grab walk clip — Walking.fbx has it as animations[0]
+    if (bossFBX.animations && bossFBX.animations.length > 0) {
+      console.log('Boss available clips:', bossFBX.animations.map(a => a.name));
+      bossWalkClip = bossFBX.animations[0]; // Walking.fbx: walk is always index 0
+      console.log('Boss walk clip:', bossWalkClip?.name, 'dur:', bossWalkClip?.duration);
+    }
+  } catch(e) { console.warn('Boss model failed (game works without it):', e.message); }
+
+  setLoad(89, 'Loading boss punch...');
+  try {
+    const pFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossPunch);
+    bossPunchClip = pFBX.animations[0];
+    console.log('Boss punch clip:', bossPunchClip?.name);
+  } catch(e) { console.warn('Boss punch failed:', e.message); }
+
+  setLoad(90, 'Loading boss swipe...');
+  try {
+    const sFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossSwipe);
+    bossSwipeClip = sFBX.animations[0];
+    console.log('Boss swipe clip:', bossSwipeClip?.name);
+  } catch(e) { console.warn('Boss swipe failed:', e.message); }
+
+  setLoad(92, 'Building world...');
   buildScene();
   setupCamera();
   buildGun();
@@ -665,17 +738,17 @@ function applyQuality(q) {
   if (q === 'HIGH') {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2)); // cap at 1.2 not 1.5
     renderer.shadowMap.enabled = true;
-    scene.fog = new THREE.FogExp2(0x030810, 0.080);
+    scene.fog = new THREE.FogExp2(0x030810, 0.038);
     initGradientFog();
   } else if (q === 'MED') {
     renderer.setPixelRatio(1.0);
     renderer.shadowMap.enabled = false;
-    scene.fog = new THREE.FogExp2(0x030810, 0.070);
+    scene.fog = new THREE.FogExp2(0x030810, 0.044);
     updateGradientFog(0.030);
   } else {
     renderer.setPixelRatio(1.0);
     renderer.shadowMap.enabled = false;
-    scene.fog = new THREE.FogExp2(0x030810, 0.100); // denser fog = fewer objects rendered
+    scene.fog = new THREE.FogExp2(0x030810, 0.055); // denser fog = fewer objects rendered
     updateGradientFog(0.038);
   }
 }
@@ -717,7 +790,7 @@ function drawGradientFog(density) {
   // --- Layer 1: Horizon band (vertical gradient, peaks at ~55% from top) ---
   const horizonY = h * 0.52;
   const horizonGrad = fogCtx.createLinearGradient(0, h * 0.25, 0, h * 0.78);
-  const alpha = Math.min(0.82, density * 45);
+  const alpha = Math.min(0.82, density * 36);
   horizonGrad.addColorStop(0.0,  'rgba(2,5,14,0)');
   horizonGrad.addColorStop(0.35, 'rgba(3,8,20,' + (alpha * 0.3).toFixed(2) + ')');
   horizonGrad.addColorStop(0.55, 'rgba(4,10,24,' + (alpha * 0.72).toFixed(2) + ')');
@@ -1585,6 +1658,22 @@ function doPunch() {
       break;
     }
   }
+  // Also check boss
+  if (bossData && !bossData.dead) {
+    const dist = raycaster.ray.origin.distanceTo(bossData.pos);
+    const d    = raycaster.ray.distanceToPoint(bossData.pos);
+    if (d < 1.8 && dist < 3.5) {  // bigger hitbox for large boss
+      showHM();
+      bossData.body.traverse(c => {
+        if (c.isMesh && c.material) {
+          const origEmissive = c.material.emissive ? c.material.emissive.clone() : new THREE.Color(0,0,0);
+          c.material.emissive = new THREE.Color(.6, 0.1, 0);
+          setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
+        }
+      });
+      damageBoss(2);
+    }
+  }
 }
 
 function playDamageAnim(e) {
@@ -1669,6 +1758,22 @@ function shoot() {
     }
     if (best.hp <= 0) killEnemy(best);
   }
+  // Also check boss with revolver
+  if (bossData && !bossData.dead) {
+    const bd    = raycaster.ray.distanceToPoint(bossData.pos);
+    const along = raycaster.ray.origin.distanceTo(bossData.pos);
+    if (bd < 1.8 && along > 0.3) {  // bigger hitbox for large boss
+      showHM();
+      bossData.body.traverse(c => {
+        if (c.isMesh && c.material) {
+          const origEmissive = c.material.emissive ? c.material.emissive.clone() : new THREE.Color(0,0,0);
+          c.material.emissive = new THREE.Color(.6, 0.1, 0);
+          setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
+        }
+      });
+      damageBoss(1);
+    }
+  }
   if (ammo === 0) setTimeout(startReload, 320);
 }
 
@@ -1693,6 +1798,238 @@ function startReload() {
     revolverMixer.addEventListener('finished', onReloadDone);
   }
 }
+// =====================================================
+//  BOSS SYSTEM
+// =====================================================
+function spawnBoss() {
+  if (!bossTemplate || bossActive) return;
+
+  // Pick a far spawn point
+  const angle = Math.random() * Math.PI * 2;
+  const sp = new THREE.Vector3(Math.cos(angle) * 22, 0, Math.sin(angle) * 22);
+
+  const bossClone = THREE.SkeletonUtils.clone(bossTemplate);
+  const bossMixer = new THREE.AnimationMixer(bossClone);
+
+  // Start walking
+  if (bossWalkClip) {
+    const wa = bossMixer.clipAction(bossWalkClip);
+    wa.reset();
+    wa.setLoop(THREE.LoopRepeat, Infinity);
+    wa.timeScale = 0.85;
+    wa.enabled = true;
+    wa.weight = 1;
+    wa.play();
+    console.log('Boss walk action started, clip:', bossWalkClip.name);
+  } else {
+    console.warn('No bossWalkClip available at spawn time');
+  }
+
+  const pivot = new THREE.Group();
+  pivot.position.set(sp.x, 0, sp.z);
+  pivot.add(bossClone);
+
+  // Boss glow — red ominous light
+  const bossLight = new THREE.PointLight(0xff1100, 3.0, 8);
+  bossLight.position.set(0, 2.0, 0);
+  pivot.add(bossLight);
+
+  scene.add(pivot);
+
+  const maxHp = BOSS_HP_BASE + wave * 10;
+  bossData = {
+    mesh: pivot,
+    body: bossClone,
+    mixer: bossMixer,
+    bossLight,
+    pos: sp.clone(),
+    hp: maxHp, maxHp,
+    speed: 2.8 + wave * 0.15,
+    attackT: 0,
+    attackState: null,
+    dead: false,
+    phase: 1,        // 1=normal, 2=enraged (<50% hp), 3=berserk (<25% hp)
+    dyingUntil: null,
+  };
+
+  bossActive = true;
+
+  // Show boss HUD
+  document.getElementById('bossHud').style.display = 'block';
+  updateBossHUD();
+
+  // Announce
+  const el = document.getElementById('wmsg');
+  el.textContent = '⚠ BOSS INCOMING ⚠';
+  el.style.color = '#ff3333';
+  el.style.opacity = 1;
+  waveAT = 4.0;
+  setTimeout(() => { el.style.color = ''; }, 4000);
+
+  console.log('Boss spawned, HP:', maxHp);
+}
+
+function updateBossHUD() {
+  if (!bossData) return;
+  const pct = Math.max(0, bossData.hp / bossData.maxHp * 100);
+  document.getElementById('bossHpFill').style.width = pct + '%';
+  document.getElementById('bossHpText').textContent =
+    Math.max(0, bossData.hp) + ' / ' + bossData.maxHp;
+  // Color shift by phase
+  const color = pct > 50 ? 'linear-gradient(90deg,#880000,#ff2222)'
+              : pct > 25 ? 'linear-gradient(90deg,#aa4400,#ff6600)'
+              : 'linear-gradient(90deg,#cc0000,#ffff00)';
+  document.getElementById('bossHpFill').style.background = color;
+}
+
+function damageBoss(dmg) {
+  if (!bossData || bossData.dead) return;
+  bossData.hp -= dmg;
+  updateBossHUD();
+
+  // Phase transitions
+  const pct = bossData.hp / bossData.maxHp;
+  if (pct < 0.25 && bossData.phase < 3) {
+    bossData.phase = 3;
+    bossData.speed *= 1.4;
+    document.getElementById('bossName').textContent = '⚠ BERSERK ⚠';
+    bossData.bossLight.color.set(0xff6600);
+  } else if (pct < 0.5 && bossData.phase < 2) {
+    bossData.phase = 2;
+    bossData.speed *= 1.2;
+    document.getElementById('bossName').textContent = '⚠ ENRAGED ⚠';
+    bossData.bossLight.color.set(0xff2200);
+  }
+
+  if (bossData.hp <= 0) killBoss();
+}
+
+function killBoss() {
+  if (!bossData || bossData.dead) return;
+  bossData.dead = true;
+  bossActive = false;
+
+  score += 2000 * wave;
+  updateHUD();
+
+  // Death fall
+  if (bossData.mixer && deathAnimClip) {
+    bossData.mixer.stopAllAction();
+    const da = bossData.mixer.clipAction(deathAnimClip);
+    da.reset(); da.setLoop(THREE.LoopOnce, 1);
+    da.clampWhenFinished = true; da.play();
+    bossData.dyingUntil = performance.now()/1000 + deathAnimClip.duration + 0.5;
+    setTimeout(() => {
+      scene.remove(bossData.mesh);
+      bossData = null;
+      document.getElementById('bossHud').style.display = 'none';
+    }, (deathAnimClip.duration * 1000) + 500);
+  } else {
+    bossData.mesh.rotation.x = Math.PI / 2.2;
+    setTimeout(() => {
+      scene.remove(bossData.mesh);
+      bossData = null;
+      document.getElementById('bossHud').style.display = 'none';
+    }, 1200);
+  }
+
+  // Announce
+  const el = document.getElementById('wmsg');
+  el.textContent = '★ BOSS DEFEATED ★';
+  el.style.color = '#ffdd44';
+  el.style.opacity = 1;
+  waveAT = 3.5;
+  setTimeout(() => { el.style.color = ''; }, 4000);
+}
+
+function updateBossAI(dt, elapsed, pp) {
+  if (!bossData || bossData.dead) return;
+
+  // Update mixer
+  const now_s = performance.now() / 1000;
+  if (!bossData.dead || (bossData.dyingUntil && now_s < bossData.dyingUntil)) {
+    bossData.mixer.update(dt);
+  }
+
+  if (bossData.dead) return;
+
+  const toP  = new THREE.Vector3(pp.x - bossData.pos.x, 0, pp.z - bossData.pos.z);
+  const dist = toP.length();
+
+  // Rotate toward player
+  const targetAngle = Math.atan2(pp.x - bossData.pos.x, pp.z - bossData.pos.z);
+  let da = targetAngle - bossData.mesh.rotation.y;
+  while (da >  Math.PI) da -= Math.PI * 2;
+  while (da < -Math.PI) da += Math.PI * 2;
+  bossData.mesh.rotation.y += da * Math.min(1, dt * 6);
+
+  const BOSS_ATTACK_DIST = 2.2;
+  const BOSS_STOP_DIST   = 1.8;
+
+  // Walk toward player
+  if (dist > BOSS_STOP_DIST && !bossData.attackState) {
+    const maxStep = dist - BOSS_STOP_DIST;
+    const step = Math.min(bossData.speed * dt, maxStep);
+    const dir = toP.clone().normalize().multiplyScalar(step);
+    bossData.pos.x += dir.x;
+    bossData.pos.z += dir.z;
+
+    if (bossWalkClip) {
+      const wa = bossData.mixer.clipAction(bossWalkClip);
+      if (!wa.isRunning()) { wa.reset(); wa.setLoop(THREE.LoopRepeat, Infinity); wa.play(); }
+    }
+  }
+  bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
+
+  // Attack pattern — alternates punch/swipe, combos in berserk phase
+  if (dist < BOSS_ATTACK_DIST) {
+    if (bossData.attackT > 0) bossData.attackT -= dt;
+
+    if (bossData.attackT <= 0 && !bossData.attackState) {
+      // Pick attack based on phase
+      const pool = bossData.phase >= 2
+        ? [bossPunchClip, bossSwipeClip, bossSwipeClip].filter(Boolean)
+        : [bossPunchClip, bossSwipeClip].filter(Boolean);
+      const clip = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+
+      if (clip) {
+        const wa = bossWalkClip ? bossData.mixer.clipAction(bossWalkClip) : null;
+        const aa = bossData.mixer.clipAction(clip);
+
+        aa.reset();
+        aa.setLoop(THREE.LoopOnce, 1);
+        aa.clampWhenFinished = true;
+        if (wa) aa.crossFadeFrom(wa, 0.12, true);
+        aa.play();
+        bossData.attackState = aa;
+
+        // Boss hits harder than zombies
+        const dmgAmt = bossData.phase === 3 ? 18 : bossData.phase === 2 ? 12 : 8;
+        setTimeout(() => { if (!bossData?.dead) takeDmg(dmgAmt); }, clip.duration * 0.45 * 1000);
+
+        const onDone = (ev) => {
+          if (ev.action !== aa) return;
+          bossData.mixer.removeEventListener('finished', onDone);
+          if (!bossData || bossData.dead) return;
+          bossData.attackState = null;
+          // Shorter cooldown when enraged
+          bossData.attackT = bossData.phase >= 3 ? 0.1 : bossData.phase === 2 ? 0.3 : 0.6;
+        };
+        bossData.mixer.addEventListener('finished', onDone);
+      } else {
+        // No clip fallback
+        takeDmg(8);
+        bossData.attackT = 1.0;
+      }
+    }
+  } else {
+    bossData.attackT = 0;
+  }
+
+  // Pulsing glow
+  bossData.bossLight.intensity = 3.0 + Math.sin(elapsed * 2.5) * 0.8;
+}
+
 function killEnemy(e) {
   e.dead = true;
   score += 200 * wave; waveLeft--;
@@ -1725,6 +2062,8 @@ function nextWave() {
   wave++; waveTotal = 4 + wave*2; waveLeft = waveTotal;
   waveSpawned = 0; spawnAccum = 0;
   updateHUD(); announceWave();
+  // Spawn boss at end of every wave (testing)
+  setTimeout(() => spawnBoss(), 2500);
 }
 function takeDmg(d) {
   health = Math.max(0, health-d); updateHUD();
@@ -1780,6 +2119,10 @@ function initGame() {
   reloading=false; reloadT=0;
   waveEnemies.forEach(e => scene.remove(e.mesh));
   waveEnemies=[]; waveSpawned=0; waveTotal=5; waveLeft=5; waveAT=0; spawnAccum=0;
+  // Reset boss
+  if (bossData) { scene.remove(bossData.mesh); bossData = null; }
+  bossActive = false;
+  document.getElementById('bossHud').style.display = 'none';
   yaw=0; pitch=0; playerPos.set(0,PH,0);
   clock = new THREE.Clock();
   flashlight.intensity=8; flOn=true;
@@ -1892,6 +2235,9 @@ function loop() {
       e.mixer.update(dt);
     }
   }
+
+  // -- Boss AI --
+  updateBossAI(dt, elapsed, playerPos.clone());
 
   // -- Enemy AI --
   const pp = playerPos.clone();
