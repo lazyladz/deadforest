@@ -102,7 +102,7 @@ canvas{display:block;}
 
 <!-- Loading screen -->
 <div id="loading">
-  <div class="ltxt">DEMO SAMPLE 3%</div>
+  <div class="ltxt">DEAD FOREST</div>
   <div id="lbar"><div id="lfill"></div></div>
   <div id="lsub">LOADING...</div>
   <div id="lerr"></div>
@@ -129,7 +129,7 @@ canvas{display:block;}
     <div id="hbar"><div id="hfill" style="width:100%"></div></div>
     <div id="sbar"><div id="sfill" style="width:100%"></div></div>
   </div>
-  <div id="aw"><div id="anum">12</div><div id="albl">ROUNDS</div></div>
+  <div id="aw"><div id="anum">12</div><div id="albl">ROUNDS</div><div id="atotal" style="font-family:'Orbitron',monospace;font-size:14px;color:rgba(130,220,150,.5);letter-spacing:3px;margin-top:4px;">/ 48</div></div>
   <!-- Boss health bar (hidden until boss spawns) -->
 <div id="bossHud" style="display:none;position:fixed;top:64px;left:50%;transform:translateX(-50%);
   z-index:12;text-align:center;pointer-events:none;">
@@ -154,7 +154,7 @@ canvas{display:block;}
 
 <!-- Start screen -->
 <div id="ls">
-  <div class="ttl">DEMO SAMPLE 3%</div>
+  <div class="ttl">DEAD FOREST</div>
   <div class="sub">THEY HAVE RISEN</div>
   <button class="btn" id="ebtn">ENTER</button>
   <div id="hint">
@@ -194,27 +194,33 @@ canvas{display:block;}
 
 // File paths -- edit these if your folder is named differently
 const PATHS = {
-  fbx:       'Zombie.fbm/Zombie.fbx',
-  baseColor: 'Zombie.fbm/material_baseColor_0.png',
-  normal:    'Zombie.fbm/material_normal_2.png',
-  walkAnim:    'Zombie.fbm/characters3d.com - Walk Forward.fbx',
-  deathAnim:   'Zombie.fbm/characters3d_com_-_Zombie_Death.fbx',
-  attack1Anim: 'Zombie.fbm/characters3d_com_-_Zombie_Attack2.fbx',
-  attack2Anim: 'Zombie.fbm/characters3d_com_-_Zombie_Attack.fbx',
+  fbx:         'Zombie_Running.fbx',
+  walkAnim:    'Zombie_Running.fbx',
+  attack1Anim: 'Zombie_Punching.fbx',
+  attack2Anim: 'Standing_Melee_Combo_Attack_Ver__3.fbx',
+  deathAnim:   'Zombie_Dying.fbx',
   winterTrees:  'pine_tree_fbx_4k/scene.gltf',
   grass:        'realisticgrass/scene.gltf',
   groundAlbedo: 'patchy-meadow1-unity/patchy-meadow1_albedo.png',
   groundNormal: 'patchy-meadow1-unity/patchy-meadow1_normal-ogl.png',
-  revolver:     'revolver/revolver.glb',
+  revolver:     'fps_pistol_animations.glb',
   fists:        'fists_2025__first_person_animations.glb',
   oldHouse:     'old_house/old_house.glb',
   rock:         'rock_boulder_2_game_ready_asset.glb',
-  damageAnim:   'Zombie.fbm/characters3d_com_-_Zombie_Damage.fbx',
+  woodenLogs:   'wooden_logs_-_asset_pack.glb',
+  ammoBox:      '9mm_ammo_box.glb',
+  damageAnim:   'Zombie_Reaction_Hit__1_.fbx',
   rockBoulder:  'rock_boulder_2_game_ready_asset.glb',
-  damageAnim:   'characters3d_com_-_Zombie_Damage.fbx',
+  sfxGunshot:   'gunshot.mp3',
+  sfxReload:    'reload.mp3',
+  sfxAmbient:   'Eerie_Ambient_Sounds_I_Recorded__spooky___320_.mp3',
+
   bossModel:    'Walking.fbx',
   bossPunch:    'Mutant_Punch.fbx',
   bossSwipe:    'Mutant_Swiping.fbx',
+  bossEvade:    'Corkscrew_Evade.fbx',
+  bossSprint:   'Fast_Run.fbx',
+  bossJump:     'Mutant_Jump_Attack.fbx',
 };
 
 // =====================================================
@@ -222,7 +228,10 @@ const PATHS = {
 // =====================================================
 let renderer, scene, camera, clock;
 let gameRunning = false, pointerLocked = false, animId = null;
-let health=100, ammo=12, maxAmmo=12, score=0, wave=1;
+let sfxGunshot = null, sfxReload = null, sfxAmbient = null;
+let health=100, ammo=12, maxAmmo=12, totalAmmo=48, score=0, wave=1;
+let lastShotTime = 0;
+const SHOT_COOLDOWN = 0.35; // seconds between shots (semi-auto feel)
 let reloading=false, reloadT=0, reloadDur=1.8;
 let waveEnemies=[], waveSpawned=0, waveTotal=5, waveLeft=5, waveAT=0;
 let spawnAccum=0, stamina=100;
@@ -245,6 +254,9 @@ let activeWeapon = 'fists'; // 'revolver' or 'fists'
 let punchAlternate = false; // alternate L/R punches
 let houseTemplate = null;
 let rockTemplate  = null;
+let logsTemplate  = null;
+let ammoBoxTemplate = null;
+let ammoPickups   = []; // { mesh, pos, active }
 let bobTime=0, bobAmt=0;
 const collidables = [];
 let QUALITY = 'HIGH';
@@ -252,8 +264,8 @@ let pointLights = [];
 let zombieTemplate  = null;  // the loaded FBX object
 let walkAnimClip    = null;  // walk animation extracted from Walk Forward.fbx
 let deathAnimClip   = null;  // death animation
-let attack1Clip     = null;  // Zombie Attack 1
-let attack2Clip     = null;  // Zombie Attack 2
+let attack1Clip     = null;  // Zombie Attack 1 (Zombie_Punching)
+let attack2Clip     = null;  // Zombie Attack 2 (Standing_Melee_Combo)
 let damageAnimClip  = null;  // Zombie hit/damage react
 let zombieBaseTex   = null;  // stored so each clone can get fresh material
 let zombieNormTex   = null;
@@ -268,6 +280,8 @@ let bossTemplate   = null;
 let bossPunchClip  = null;
 let bossSwipeClip  = null;
 let bossWalkClip   = null;
+let bossEvadeClip  = null;  // Corkscrew_Evade.fbx
+let bossSprintClip = null;  // Fast_Run.fbx
 let bossActive     = false;
 let bossData       = null; // single boss object
 const BOSS_WAVE    = 3;    // boss spawns every 3rd wave
@@ -300,46 +314,37 @@ async function boot() {
     return;
   }
 
-  setLoad(30, 'Loading textures...');
-  let baseColorTex, normalTex;
+  setLoad(50, 'Loading Zombie_Running.fbx...');
+  const fbxLoader = new THREE.FBXLoader();
   try {
-    const tl = new THREE.TextureLoader();
-    [baseColorTex, normalTex] = await Promise.all([
-      loadTex(tl, PATHS.baseColor),
-      loadTex(tl, PATHS.normal),
-    ]);
-    baseColorTex.flipY        = false;
-    baseColorTex.encoding     = THREE.sRGBEncoding;
-    baseColorTex.needsUpdate  = true;
-    normalTex.flipY           = false;
-    zombieBaseTex = baseColorTex;
-    zombieNormTex = normalTex;
-  } catch(e) {
-    showError('Could not load textures from: ' + PATHS.baseColor +
-              '<br>Make sure the Zombie.fbm folder is next to this HTML file and you are running a local server.');
-    return;
-  }
-
-  setLoad(55, 'Loading Zombie.fbx...');
-  try {
-    const fbxLoader = new THREE.FBXLoader();
     zombieTemplate = await loadFBX(fbxLoader, PATHS.fbx);
   } catch(e) {
-    showError('Could not load Zombie.fbx from: ' + PATHS.fbx +
-              '<br>Make sure the file exists and you are running a local server (not file://).');
+    showError('Could not load Zombie_Running.fbx.<br>Make sure it is next to the HTML file and you are running a local server.');
     return;
   }
 
-  setLoad(75, 'Applying textures to zombie...');
-  prepareZombie(zombieTemplate, baseColorTex, normalTex);
+  setLoad(70, 'Preparing zombie...');
+  prepareZombie(zombieTemplate, null, null);
 
   setLoad(82, 'Loading walk animation...');
   try {
-    const walkFBX = await loadFBX(new THREE.FBXLoader(), PATHS.walkAnim);
+    // Zombie_Running.fbx contains both model and walk animation
+    const walkFBX = zombieTemplate; // reuse already-loaded model
     if (walkFBX.animations && walkFBX.animations.length > 0) {
-      // Walk Forward is always index [1]; index [0] is the static T-Pose
-      walkAnimClip = walkFBX.animations[1] || walkFBX.animations[0];
-      console.log('Walk clip:', walkAnimClip.name, 'tracks:', walkAnimClip.tracks.length, 'dur:', walkAnimClip.duration.toFixed(2));
+      // Zombie_Running.fbx — animation[0] is the run cycle
+      walkAnimClip = walkFBX.animations[0];
+      // Strip root motion tracks — these bake world-space position into the clip
+      // which causes the character to snap back to origin on every loop
+      walkAnimClip.tracks = walkAnimClip.tracks.filter(t => {
+        const name = t.name.toLowerCase();
+        // Remove position tracks on root/hips bones (root motion)
+        // Keep position tracks on non-root bones (e.g. hands, feet offsets)
+        const isRootBone = name.includes('hips') || name.includes(':root') ||
+                           name === 'position' || name.startsWith('mixamorig:hips');
+        const isPositionTrack = name.endsWith('.position');
+        return !(isRootBone && isPositionTrack);
+      });
+      console.log('Walk clip:', walkAnimClip.name, 'tracks after root strip:', walkAnimClip.tracks.length, 'dur:', walkAnimClip.duration.toFixed(2));
 
 
 
@@ -354,8 +359,8 @@ async function boot() {
   try {
     const deathFBX = await loadFBX(new THREE.FBXLoader(), PATHS.deathAnim);
     if (deathFBX.animations && deathFBX.animations.length > 0) {
-      // Same structure as walk FBX: [0]=T-Pose (static), [1]=actual animation
-      deathAnimClip = deathFBX.animations[1] || deathFBX.animations[0];
+      // Zombie_Dying.fbx: animation[0] is the death clip
+      deathAnimClip = deathFBX.animations[0];
       console.log('All death clips:', deathFBX.animations.map(a=>a.name+' ('+a.duration.toFixed(2)+'s)').join(', '));
       console.log('Using death clip:', deathAnimClip.name, 'dur:', deathAnimClip.duration.toFixed(2), 'tracks:', deathAnimClip.tracks.length);
     }
@@ -367,12 +372,20 @@ async function boot() {
   setLoad(84, 'Loading attack animations...');
   try {
     const atk1FBX = await loadFBX(new THREE.FBXLoader(), PATHS.attack1Anim);
-    attack1Clip = atk1FBX.animations[1] || atk1FBX.animations[0];
+    attack1Clip = atk1FBX.animations[0]; // Zombie_Punching.fbx
+    attack1Clip.tracks = attack1Clip.tracks.filter(t => {
+      const name = t.name.toLowerCase();
+      return !(( name.includes('hips') || name.includes(':root') || name === 'position') && t.name.endsWith('.position'));
+    });
     console.log('Attack1 clip:', attack1Clip.name, 'dur:', attack1Clip.duration.toFixed(2));
   } catch(e) { console.warn('Attack1 anim failed:', e.message); }
   try {
     const atk2FBX = await loadFBX(new THREE.FBXLoader(), PATHS.attack2Anim);
-    attack2Clip = atk2FBX.animations[1] || atk2FBX.animations[0];
+    attack2Clip = atk2FBX.animations[0]; // Standing_Melee_Combo_Attack_Ver__3.fbx
+    attack2Clip.tracks = attack2Clip.tracks.filter(t => {
+      const name = t.name.toLowerCase();
+      return !(( name.includes('hips') || name.includes(':root') || name === 'position') && t.name.endsWith('.position'));
+    });
     console.log('Attack2 clip:', attack2Clip.name, 'dur:', attack2Clip.duration.toFixed(2));
   } catch(e) { console.warn('Attack2 anim failed:', e.message); }
 
@@ -490,6 +503,22 @@ async function boot() {
       const mats = Array.isArray(c.material) ? c.material : [c.material];
       mats.forEach(m => { if (m.map) m.map.encoding = THREE.sRGBEncoding; });
     });
+    // Measure template in local space — no scene/matrix needed
+    // updateMatrixWorld on the template itself so child transforms apply
+    houseTemplate.updateMatrixWorld(true);
+    {
+      const tmpBox = new THREE.Box3();
+      houseTemplate.traverse(c => {
+        if (!c.isMesh) return;
+        const cb = new THREE.Box3().setFromBufferAttribute(c.geometry.attributes.position);
+        cb.applyMatrix4(c.matrixWorld);
+        tmpBox.union(cb);
+      });
+      houseTemplate.userData.localBox = tmpBox; // store full local bbox
+      const sz = tmpBox.getSize(new THREE.Vector3());
+      console.log('House template local bbox:', tmpBox.min.x.toFixed(1), tmpBox.min.z.toFixed(1),
+        'to', tmpBox.max.x.toFixed(1), tmpBox.max.z.toFixed(1), '| size:', sz.x.toFixed(2), 'x', sz.z.toFixed(2));
+    }
     console.log('House loaded OK');
   } catch(e) { console.warn('House failed:', e.message); }
 
@@ -511,7 +540,12 @@ async function boot() {
   setLoad(87, 'Loading damage animation...');
   try {
     const dmgFBX = await loadFBX(new THREE.FBXLoader(), PATHS.damageAnim);
-    damageAnimClip = dmgFBX.animations[1] || dmgFBX.animations[0];
+    damageAnimClip = dmgFBX.animations[0];
+    // Strip root motion so zombie doesn't snap back on loop
+    damageAnimClip.tracks = damageAnimClip.tracks.filter(t => {
+      const n = t.name.toLowerCase();
+      return !((n.includes('hips') || n.includes(':root') || n === 'position') && t.name.endsWith('.position'));
+    });
     console.log('Damage clip:', damageAnimClip.name, 'dur:', damageAnimClip.duration.toFixed(2));
   } catch(e) { console.warn('Damage anim failed:', e.message); }
 
@@ -531,12 +565,44 @@ async function boot() {
     console.log('Rock loaded OK');
   } catch(e) { console.warn('Rock failed:', e.message); }
 
-  setLoad(87, 'Loading zombie damage animation...');
+  setLoad(87, 'Loading wooden logs...');
   try {
-    const dmgFBX = await loadFBX(new THREE.FBXLoader(), PATHS.damageAnim);
-    if (dmgFBX.animations && dmgFBX.animations.length > 0) {
-      damageAnimClip = dmgFBX.animations[1] || dmgFBX.animations[0];
-      console.log('Damage clip:', damageAnimClip.name, 'dur:', damageAnimClip.duration.toFixed(2));
+    const logsGLTF = await new Promise((res,rej) =>
+      new THREE.GLTFLoader().load(PATHS.woodenLogs, res, undefined, rej)
+    );
+    logsTemplate = logsGLTF.scene;
+    logsTemplate.traverse(c => {
+      if (!c.isMesh) return;
+      c.castShadow = true; c.receiveShadow = true;
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m => { if (m.map) m.map.encoding = THREE.sRGBEncoding; });
+    });
+    console.log('Wooden logs loaded OK');
+  } catch(e) { console.warn('Wooden logs failed:', e.message); }
+
+  setLoad(87, 'Loading ammo box...');
+  try {
+    const ammoGLTF = await new Promise((res,rej) =>
+      new THREE.GLTFLoader().load(PATHS.ammoBox, res, undefined, rej)
+    );
+    ammoBoxTemplate = ammoGLTF.scene;
+    ammoBoxTemplate.traverse(c => {
+      if (!c.isMesh) return;
+      c.castShadow = false; c.receiveShadow = true;
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m => { if (m.map) m.map.encoding = THREE.sRGBEncoding; });
+    });
+    console.log('Ammo box loaded OK');
+  } catch(e) { console.warn('Ammo box failed:', e.message); }
+  try {
+    const dmgFBX2 = await loadFBX(new THREE.FBXLoader(), PATHS.damageAnim);
+    if (dmgFBX2.animations && dmgFBX2.animations.length > 0) {
+      damageAnimClip = dmgFBX2.animations[0];
+      damageAnimClip.tracks = damageAnimClip.tracks.filter(t => {
+        const n = t.name.toLowerCase();
+        return !((n.includes('hips') || n.includes(':root') || n === 'position') && t.name.endsWith('.position'));
+      });
+      console.log('Damage clip (2nd load):', damageAnimClip.name, 'dur:', damageAnimClip.duration.toFixed(2));
     }
   } catch(e) { console.warn('Damage anim failed:', e.message); }
 
@@ -565,7 +631,14 @@ async function boot() {
     if (bossFBX.animations && bossFBX.animations.length > 0) {
       console.log('Boss available clips:', bossFBX.animations.map(a => a.name));
       bossWalkClip = bossFBX.animations[0]; // Walking.fbx: walk is always index 0
-      console.log('Boss walk clip:', bossWalkClip?.name, 'dur:', bossWalkClip?.duration);
+      // Strip root motion from boss walk clip too
+      bossWalkClip.tracks = bossWalkClip.tracks.filter(t => {
+        const name = t.name.toLowerCase();
+        const isRootBone = name.includes('hips') || name.includes(':root') ||
+                           name === 'position' || name.startsWith('mixamorig:hips');
+        return !(isRootBone && t.name.endsWith('.position'));
+      });
+      console.log('Boss walk clip:', bossWalkClip?.name, 'tracks after root strip:', bossWalkClip?.tracks.length, 'dur:', bossWalkClip?.duration);
     }
   } catch(e) { console.warn('Boss model failed (game works without it):', e.message); }
 
@@ -583,6 +656,39 @@ async function boot() {
     console.log('Boss swipe clip:', bossSwipeClip?.name);
   } catch(e) { console.warn('Boss swipe failed:', e.message); }
 
+  setLoad(91, 'Loading boss evade...');
+  try {
+    const eFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossEvade);
+    bossEvadeClip = eFBX.animations[0];
+    bossEvadeClip.tracks = bossEvadeClip.tracks.filter(t => {
+      const name = t.name.toLowerCase();
+      const isRootBone = name.includes('hips') || name.includes(':root') || name === 'position';
+      return !(isRootBone && t.name.endsWith('.position'));
+    });
+    console.log('Boss evade clip:', bossEvadeClip?.name);
+  } catch(e) { console.warn('Boss evade failed:', e.message); }
+
+  setLoad(91, 'Loading boss sprint...');
+  try {
+    const rFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossSprint);
+    bossSprintClip = rFBX.animations[0];
+    bossSprintClip.tracks = bossSprintClip.tracks.filter(t => {
+      const name = t.name.toLowerCase();
+      const isRootBone = name.includes('hips') || name.includes(':root') || name === 'position';
+      return !(isRootBone && t.name.endsWith('.position'));
+    });
+    console.log('Boss sprint clip:', bossSprintClip?.name);
+
+    const jFBX = await loadFBX(new THREE.FBXLoader(), PATHS.bossJump);
+    bossJumpClip = jFBX.animations[0];
+    bossJumpClip.tracks = bossJumpClip.tracks.filter(t => {
+      const name = t.name.toLowerCase();
+      const isRootBone = name.includes('hips') || name.includes(':root') || name === 'position';
+      return !(isRootBone && t.name.endsWith('.position'));
+    });
+    console.log('Boss jump clip:', bossJumpClip?.name);
+  } catch(e) { console.warn('Boss sprint failed:', e.message); }
+
   setLoad(92, 'Building world...');
   buildScene();
   setupCamera();
@@ -594,6 +700,26 @@ async function boot() {
 
   loadingEl.style.display = 'none';
   lsEl.style.display = 'flex';
+  // Load sound effects
+  try {
+    sfxGunshot = new Audio(PATHS.sfxGunshot);
+    sfxGunshot.preload = 'auto';
+    sfxReload  = new Audio(PATHS.sfxReload);
+    sfxReload.preload  = 'auto';
+    sfxAmbient = new Audio(PATHS.sfxAmbient);
+    sfxAmbient.loop   = true;
+    sfxAmbient.volume = 1.0;
+    sfxAmbient.preload = 'auto';
+  } catch(e) { console.warn('SFX load failed:', e); }
+
+  // Cache DOM refs once
+  _sfill  = document.getElementById('sfill');
+  _rprog  = document.getElementById('rprog');
+  _rui    = document.getElementById('rui');
+  _wmsg   = document.getElementById('wmsg');
+  _fpsel  = document.getElementById('fps');
+  _anum   = document.getElementById('anum');
+  _hfill  = document.getElementById('hfill');
 
   // Preview render loop (before game starts)
   (function preview() {
@@ -643,6 +769,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 let zombieFootOffset = 0; // stored after scaling so clones use it
 
 function prepareZombie(model, baseColorTex, normalTex) {
+  // Zombie_Running.fbx has embedded textures — no external tex needed
   // Scale to ~1.85 world units tall
   const box = new THREE.Box3().setFromObject(model);
   const modelH = box.max.y - box.min.y;
@@ -658,13 +785,9 @@ function prepareZombie(model, baseColorTex, normalTex) {
 }
 
 function makeFreshZombieMaterial() {
-  return new THREE.MeshPhongMaterial({
-    map:         zombieBaseTex,
-    normalMap:   zombieNormTex,
-    normalScale: new THREE.Vector2(1, 1),
-    shininess:   18,
-    skinning:    true,  // REQUIRED in r128 for bone animation to work
-  });
+  // Zombie_Running.fbx has embedded textures — material is on the mesh already
+  // Return null so clones use their own embedded materials
+  return null;
 }
 
 // =====================================================
@@ -707,8 +830,7 @@ function initRenderer() {
   renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' }); // antialias off = big win
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.BasicShadowMap; // BasicShadowMap faster than PCFSoft
+  renderer.shadowMap.enabled = false; // Disabled — no shadow casters use it for perf // BasicShadowMap faster than PCFSoft
   renderer.setClearColor(0x010307);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.82;
@@ -857,6 +979,7 @@ function buildScene() {
   buildStaticProps();
   buildRockBoulders();
   buildGrass();
+  buildAmmoPickups();
 
   // Eerie scattered lights
   for (const [x, y, z, col, i, d] of [
@@ -953,17 +1076,24 @@ function buildForestInstanced() {
     const TC = 90;
     const dummy = new THREE.Object3D();
 
+    // Add template to scene temporarily to resolve world positions
+    scene.add(winterTreesTemplate);
+    winterTreesTemplate.updateMatrixWorld(true);
+
     // One InstancedMesh per source mesh (trunk / foliage)
     const instancedMeshes = meshSources.map(src => {
-      // Use material directly -- already fixed in loader (DoubleSide, alphaTest, sRGB)
       const mat = Array.isArray(src.material) ? src.material[0] : src.material;
       const im = new THREE.InstancedMesh(src.geometry, mat, TC);
-      im.castShadow    = false; // tree shadows are expensive on instanced meshes
+      im.castShadow    = false;
       im.receiveShadow = true;
       im.count = 0;
       scene.add(im);
+      // getWorldPosition works now that template is in scene with updated matrix
       return { im, srcPos: src.getWorldPosition(new THREE.Vector3()), srcScale: src.getWorldScale(new THREE.Vector3()) };
     });
+
+    // Remove template — we only needed it for matrix computation
+    scene.remove(winterTreesTemplate);
 
     let placed = 0;
     const positions = [];
@@ -1143,26 +1273,30 @@ function buildHouse(pos, rotY = 0) {
     const s = 8.0 / maxDim;
     house.scale.setScalar(s);
 
-    // Sit flush on ground
+    // Center the house on group origin (GLB origin is offset) and sit flush on ground
     const box2 = new THREE.Box3().setFromObject(house);
+    const center = box2.getCenter(new THREE.Vector3());
+    house.position.x = -center.x;
+    house.position.z = -center.z;
     house.position.y = -box2.min.y;
 
     g.add(house);
-  } else {
-    // Fallback simple box house
-    const wm = gm('wall', () => new THREE.MeshLambertMaterial({ color: 0x2a1e10 }));
-    const rm  = gm('roof', () => new THREE.MeshLambertMaterial({ color: 0x1a1208 }));
-    const dm  = gm('dark', () => new THREE.MeshLambertMaterial({ color: 0x0e0a06 }));
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(8,4.2,6.5), wm);
-    walls.position.y=2.25; walls.castShadow=true; walls.receiveShadow=true; g.add(walls);
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(6,3,4), rm);
-    roof.position.y=5.85; roof.rotation.y=Math.PI/4; roof.castShadow=true; g.add(roof);
-    const chimney = new THREE.Mesh(new THREE.BoxGeometry(.8,2.2,.8), dm);
-    chimney.position.set(2.5,6.1,0); chimney.castShadow=true; g.add(chimney);
   }
 
   scene.add(g);
-  collidables.push({ min: new THREE.Vector3(pos.x-4.5,-1,pos.z-3.8), max: new THREE.Vector3(pos.x+4.5,6,pos.z+3.8) });
+  // Collision: house 8x5 (from real GLB: 273.45 x 171.02 raw, scaled to 8)
+  {
+    const corners = [[-4,-2.502],[4,-2.502],[4,2.502],[-4,2.502]];
+    const cos = Math.cos(rotY), sin = Math.sin(rotY);
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    for (const [cx,cz] of corners) {
+      const wx = pos.x + cx*cos - cz*sin;
+      const wz = pos.z + cx*sin + cz*cos;
+      minX=Math.min(minX,wx); maxX=Math.max(maxX,wx);
+      minZ=Math.min(minZ,wz); maxZ=Math.max(maxZ,wz);
+    }
+    collidables.push({ min:new THREE.Vector3(minX,-1,minZ), max:new THREE.Vector3(maxX,6,maxZ) });
+  }
   const il = new THREE.PointLight(0x221400, 1, 9);
   il.position.set(pos.x, 1.8, pos.z); scene.add(il);
   pointLights.push({ light: il, base: 1, phase: Math.random()*Math.PI*2 });
@@ -1179,18 +1313,30 @@ function buildBarn(pos) {
     const box = new THREE.Box3().setFromObject(house);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.z);
-    const s = 12.0 / maxDim; // larger than regular houses
+    const s = 12.0 / maxDim;
     house.scale.setScalar(s);
     const box2 = new THREE.Box3().setFromObject(house);
+    const center = box2.getCenter(new THREE.Vector3());
+    house.position.x = -center.x;
+    house.position.z = -center.z;
     house.position.y = -box2.min.y;
     g.add(house);
-  } else {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(12,5,8), gm('barn',()=>new THREE.MeshLambertMaterial({color:0x3a2015})));
-    b.position.y=2.5; b.castShadow=true; b.receiveShadow=true; g.add(b);
   }
 
   scene.add(g);
-  collidables.push({ min: new THREE.Vector3(pos.x-6,-1,pos.z-4), max: new THREE.Vector3(pos.x+6,6,pos.z+4) });
+  // Collision: barn 12x7.5 (same GLB scaled to 12)
+  {
+    const corners = [[-6,-3.752],[6,-3.752],[6,3.752],[-6,3.752]];
+    const cos = Math.cos(1.2), sin = Math.sin(1.2);
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    for (const [cx,cz] of corners) {
+      const wx = pos.x + cx*cos - cz*sin;
+      const wz = pos.z + cx*sin + cz*cos;
+      minX=Math.min(minX,wx); maxX=Math.max(maxX,wx);
+      minZ=Math.min(minZ,wz); maxZ=Math.max(maxZ,wz);
+    }
+    collidables.push({ min:new THREE.Vector3(minX,-1,minZ), max:new THREE.Vector3(maxX,6,maxZ) });
+  }
 }
 
 function mergeGeos(geos) {
@@ -1262,6 +1408,45 @@ function buildRockBoulders() {
   console.log('Rock boulders placed:', positions.length);
 }
 
+function buildAmmoPickups() {
+  if (!ammoBoxTemplate) return;
+
+  // Measure ammo box for scaling
+  const aBox  = new THREE.Box3().setFromObject(ammoBoxTemplate);
+  const aSpan = Math.max(aBox.max.x-aBox.min.x, aBox.max.y-aBox.min.y, aBox.max.z-aBox.min.z, 0.1);
+  const targetSize = 0.4; // small box ~40cm
+  const s = targetSize / aSpan;
+
+  // Place near each house/barn — offset a few units from their positions
+  const spawnPoints = [
+    new THREE.Vector3(22+6,  0, -18+2),
+    new THREE.Vector3(22-5,  0, -18-3),
+    new THREE.Vector3(-28+6, 0,  24-3),
+    new THREE.Vector3(-28-4, 0,  24+4),
+    new THREE.Vector3(6+5,   0,  34-4),
+    new THREE.Vector3(6-6,   0,  34+3),
+    new THREE.Vector3(-8+7,  0, -28+3),
+    new THREE.Vector3(-8-5,  0, -28-4),
+  ];
+
+  for (const sp of spawnPoints) {
+    const box = ammoBoxTemplate.clone(true);
+    box.scale.setScalar(s);
+    const b2 = new THREE.Box3().setFromObject(box);
+    box.position.set(sp.x, -b2.min.y * s, sp.z);
+    box.rotation.y = Math.random()*Math.PI*2;
+
+    // Subtle green glow so player can spot it
+    const glow = new THREE.PointLight(0x44ff44, 0.8, 3);
+    glow.position.set(sp.x, 0.4, sp.z);
+    scene.add(glow);
+
+    scene.add(box);
+    ammoPickups.push({ mesh: box, glow, pos: sp.clone(), active: true });
+  }
+  console.log('Ammo pickups placed:', spawnPoints.length);
+}
+
 function buildStaticProps() {
   // Spawn real rock GLB models scattered across world
   if (rockTemplate) {
@@ -1292,17 +1477,23 @@ function buildStaticProps() {
     }
   }
 
-  const rg = [], lg = [], fg = [];
-  // (rocks now GLB above, skip old procedural rocks)
-  const lGeo = new THREE.CylinderGeometry(.15,.18,1,6,1);
-  for (let i = 0; i < 18; i++) {
-    const a=Math.random()*Math.PI*2, d=5+Math.random()*45, lx=Math.cos(a)*d, lz=Math.sin(a)*d;
-    const g2=lGeo.clone();
-    g2.applyMatrix4(new THREE.Matrix4().makeScale(1,1.5+Math.random()*2.5,1)
-      .premultiply(new THREE.Matrix4().makeRotationZ(Math.PI/2+(Math.random()-.5)*.3))
-      .premultiply(new THREE.Matrix4().makeRotationY(Math.random()*Math.PI))
-      .premultiply(new THREE.Matrix4().makeTranslation(lx,.16,lz)));
-    lg.push(g2);
+  const rg = [], fg = [];
+  // Wooden logs — use GLB model if loaded, else skip
+  if (logsTemplate) {
+    const logBox  = new THREE.Box3().setFromObject(logsTemplate);
+    const logSpan = Math.max(logBox.max.x-logBox.min.x, logBox.max.z-logBox.min.z, 0.1);
+    for (let i = 0; i < 18; i++) {
+      const a  = Math.random()*Math.PI*2, d = 5+Math.random()*45;
+      const lx = Math.cos(a)*d, lz = Math.sin(a)*d;
+      const targetSize = 1.2 + Math.random()*1.4;
+      const s  = targetSize / logSpan;
+      const log = logsTemplate.clone(true);
+      log.scale.setScalar(s);
+      log.rotation.y = Math.random()*Math.PI*2;
+      const lb = new THREE.Box3().setFromObject(log);
+      log.position.set(lx, -lb.min.y, lz);
+      scene.add(log);
+    }
   }
   const pG=new THREE.BoxGeometry(.1,1.3,.1), rG2=new THREE.BoxGeometry(1.8,.07,.06);
   for (const {ox,oz,len,ang} of [{ox:18,oz:-8,len:7,ang:.1},{ox:-12,oz:12,len:6,ang:-.18},{ox:5,oz:-22,len:8,ang:.06}]) {
@@ -1318,7 +1509,7 @@ function buildStaticProps() {
       }
     }
   }
-  try { const m=mergeGeos([...rg,...lg]); if(m){const mesh=new THREE.Mesh(m,new THREE.MeshLambertMaterial({color:0x1e1c14}));mesh.castShadow=false;mesh.receiveShadow=true;scene.add(mesh);} } catch(e){}
+  try { const m=mergeGeos([...rg]); if(m&&rg.length){const mesh=new THREE.Mesh(m,new THREE.MeshLambertMaterial({color:0x1e1c14}));mesh.castShadow=false;mesh.receiveShadow=true;scene.add(mesh);} } catch(e){}
   try { const m=mergeGeos(fg); if(m){const mesh=new THREE.Mesh(m,new THREE.MeshLambertMaterial({color:0x1a1208}));mesh.castShadow=false;scene.add(mesh);} } catch(e){}
 }
 
@@ -1353,27 +1544,22 @@ function buildGun() {
   gunGroup = new THREE.Group();
 
   if (revolverModel) {
-    const gun = revolverModel.clone(true);
+    const gun = THREE.SkeletonUtils.clone(revolverModel);
 
-    // Scale so the gun is a good FPS size
+    // Scale
     const box = new THREE.Box3().setFromObject(gun);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const s = 0.32 / maxDim;
+    const s = 0.9 / maxDim;
     gun.scale.setScalar(s);
 
-    // Rotate so barrel points forward (-Z in camera space)
-    gun.rotation.set(0, -Math.PI / 2, 0);
-
-    // After rotating, re-centre and ground the gun
-    const box2 = new THREE.Box3().setFromObject(gun);
-    const center = box2.getCenter(new THREE.Vector3());
-    gun.position.set(-center.x, -box2.min.y, -center.z);
+    gun.rotation.set(0, Math.PI, 0);
 
     gun.traverse(c => {
       if (!c.isMesh) return;
       c.castShadow = false;
       c.receiveShadow = false;
+      c.frustumCulled = false;
       const mats = Array.isArray(c.material) ? c.material : [c.material];
       mats.forEach(m => { if (m.map) m.map.encoding = THREE.sRGBEncoding; });
     });
@@ -1384,20 +1570,36 @@ function buildGun() {
     revolverMixer = new THREE.AnimationMixer(gun);
     if (revolverModel.animations && revolverModel.animations.length) {
       revolverModel.animations.forEach(clip => {
-        revolverActions[clip.name] = revolverMixer.clipAction(clip);
+        const key = clip.name.replace('Armature|FPS_Pistol_', '').toLowerCase();
+        revolverActions[key] = revolverMixer.clipAction(clip);
+        console.log('Pistol clip:', clip.name, '→', key, clip.duration.toFixed(2)+'s');
       });
+
+      revolverActions['shoot']  = revolverActions['fire'];
+      revolverActions['reload'] = revolverActions['reload_easy'];
+
+      if (revolverActions['fire']) {
+        revolverActions['fire'].setLoop(THREE.LoopOnce, 1);
+        revolverActions['fire'].clampWhenFinished = true;
+      }
+      if (revolverActions['reload_easy']) {
+        revolverActions['reload_easy'].setLoop(THREE.LoopOnce, 1);
+        revolverActions['reload_easy'].clampWhenFinished = true;
+      }
+      if (revolverActions['reload_full']) {
+        revolverActions['reload_full'].setLoop(THREE.LoopOnce, 1);
+        revolverActions['reload_full'].clampWhenFinished = true;
+      }
       if (revolverActions['idle']) {
         revolverActions['idle'].setLoop(THREE.LoopRepeat, Infinity);
         revolverActions['idle'].play();
       }
-      console.log('Revolver anims:', Object.keys(revolverActions).join(', '));
     }
 
     muzzleLight = new THREE.PointLight(0xff9944, 0, 5);
     muzzleLight.position.set(0, 0.05, -0.18);
     gunGroup.add(muzzleLight);
 
-    // FPS hold: barrel top-left, grip exits bottom-right of screen
     gunPivot.add(gunGroup);
     gunPivot.position.set(0.18, -0.16, -0.30);
     gunPivot.rotation.set(0.20, -0.10, 0.15);
@@ -1531,7 +1733,7 @@ function moveE(pos, delta) {
 // =====================================================
 function randomSpawn() {
   for (let t = 0; t < 25; t++) {
-    const a=Math.random()*Math.PI*2, d=22+Math.random()*28;
+    const a=Math.random()*Math.PI*2, d=14+Math.random()*16;
     const x=Math.cos(a)*d, z=Math.sin(a)*d;
     const p=new THREE.Vector3(x,PH,z);
     if (!collide(p, 1.2)) return p;
@@ -1542,7 +1744,7 @@ function randomSpawn() {
 function createEnemy() {
   const sp    = randomSpawn();
   const tier  = Math.floor(Math.random() * 3);
-  const speeds = [4.0, 5.5, 2.8];
+  const speeds = [4.5, 6.0, 3.5];
   const hps    = [3,   2,   7  ];
 
   // Use SkeletonUtils.clone -- the ONLY correct way to clone SkinnedMesh in Three.js r128
@@ -1559,8 +1761,8 @@ function createEnemy() {
       child.receiveShadow = true;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       mats.forEach(m => {
-        if (zombieBaseTex) m.map       = zombieBaseTex;
-        if (zombieNormTex) m.normalMap = zombieNormTex;
+        // Embedded textures — keep existing material, just ensure skinning
+        m.skinning = true;
         m.needsUpdate = true;
       });
     });
@@ -1660,9 +1862,10 @@ function doPunch() {
   }
   // Also check boss
   if (bossData && !bossData.dead) {
-    const dist = raycaster.ray.origin.distanceTo(bossData.pos);
-    const d    = raycaster.ray.distanceToPoint(bossData.pos);
-    if (d < 1.8 && dist < 3.5) {  // bigger hitbox for large boss
+    const bossBodyCenter = bossData.pos.clone().add(new THREE.Vector3(0, 1.5, 0));
+    const dist = raycaster.ray.origin.distanceTo(bossBodyCenter);
+    const d    = raycaster.ray.distanceToPoint(bossBodyCenter);
+    if (d < 1.5 && dist < 4.5) {  // full body hitbox for large boss
       showHM();
       bossData.body.traverse(c => {
         if (c.isMesh && c.material) {
@@ -1677,46 +1880,59 @@ function doPunch() {
 }
 
 function playDamageAnim(e) {
-  if (!e.mixer || !damageAnimClip || e.dead || e.attackState) return;
+  if (!e.mixer || !damageAnimClip || e.dead) return;
+  // Stop all current actions — hit reaction interrupts everything
+  e.mixer.stopAllAction();
+  if (e.attackState) e.attackState = null; // cancel attack mid-swing
   const dmg = e.mixer.clipAction(damageAnimClip);
   dmg.reset();
   dmg.setLoop(THREE.LoopOnce, 1);
   dmg.clampWhenFinished = true;
   dmg.timeScale = 1.2;
-  // Blend in quickly over walk
-  const walk = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
-  if (walk) dmg.crossFadeFrom(walk, 0.06, true);
   dmg.play();
-  // Blend back to walk after damage anim
+  // Resume walk after hit reaction finishes
   const onDone = (ev) => {
     if (ev.action !== dmg) return;
     e.mixer.removeEventListener('finished', onDone);
     if (e.dead) return;
-    if (walk) { walk.reset(); walk.crossFadeFrom(dmg, 0.1, true); walk.setLoop(THREE.LoopRepeat, Infinity); walk.play(); }
+    const walk = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
+    if (walk) {
+      walk.enabled = true;
+      walk.setLoop(THREE.LoopRepeat, Infinity);
+      walk.crossFadeFrom(dmg, 0.12, true);
+      walk.play();
+    }
   };
   e.mixer.addEventListener('finished', onDone);
 }
 
 function shoot() {
   if (activeWeapon === 'fists') { doPunch(); return; }
-  if (reloading || ammo <= 0) { if (ammo <= 0) startReload(); return; }
+  // Semi-auto: enforce cooldown between shots
+  const now_s = performance.now() / 1000;
+  if (now_s - lastShotTime < SHOT_COOLDOWN) return;
+  if (reloading || ammo <= 0) { if (ammo <= 0 && totalAmmo > 0) startReload(); return; }
+  lastShotTime = now_s;
   ammo--; updateHUD(); doMuzzle();
+  // Gunshot SFX — clone so rapid fire overlaps correctly
+  if (sfxGunshot) { const s = sfxGunshot.cloneNode(); s.volume = 0.8; s.play().catch(()=>{}); }
   // Play revolver shoot animation
-  if (revolverMixer && revolverActions['shoot']) {
+  if (revolverMixer && revolverActions['fire']) {
     const idle  = revolverActions['idle'];
-    const shoot = revolverActions['shoot'];
-    shoot.reset();
-    shoot.setLoop(THREE.LoopOnce, 1);
-    shoot.clampWhenFinished = true;
-    if (idle) shoot.crossFadeFrom(idle, 0.04, true);
-    shoot.play();
-    // Return to idle when done
-    const onShootDone = (ev) => {
-      if (ev.action !== shoot) return;
-      revolverMixer.removeEventListener('finished', onShootDone);
-      if (idle) { idle.reset(); idle.crossFadeFrom(shoot, 0.1, true); idle.play(); }
+    const fire  = revolverActions['fire'];
+    fire.stop();
+    fire.reset();
+    fire.enabled = true;
+    fire.timeScale = 1.0;
+    if (idle && idle.isRunning()) fire.crossFadeFrom(idle, 0.05, true);
+    fire.play();
+    const onFireDone = (ev) => {
+      if (ev.action !== fire) return;
+      revolverMixer.removeEventListener('finished', onFireDone);
+      fire.stop();
+      if (idle) { idle.reset(); idle.crossFadeFrom(fire, 0.1, true); idle.setLoop(THREE.LoopRepeat, Infinity); idle.play(); }
     };
-    revolverMixer.addEventListener('finished', onShootDone);
+    revolverMixer.addEventListener('finished', onFireDone);
   }
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
   let best=null, bd=Infinity;
@@ -1737,8 +1953,8 @@ function shoot() {
         setTimeout(() => { if (c.material) c.material.emissive.set(0,0,0); }, 130);
       }
     });
-    // Play damage react anim if available and zombie not in attack state
-    if (best.mixer && damageAnimClip && !best.dead && !best.attackState) {
+    // Play damage react anim
+    if (best.mixer && damageAnimClip && !best.dead) {
       const dmgAction = best.mixer.clipAction(damageAnimClip);
       const walkAction = walkAnimClip ? best.mixer.clipAction(walkAnimClip) : null;
       dmgAction.reset();
@@ -1760,9 +1976,11 @@ function shoot() {
   }
   // Also check boss with revolver
   if (bossData && !bossData.dead) {
-    const bd    = raycaster.ray.distanceToPoint(bossData.pos);
-    const along = raycaster.ray.origin.distanceTo(bossData.pos);
-    if (bd < 1.8 && along > 0.3) {  // bigger hitbox for large boss
+    // Full-body hitbox: check ray against tall box spanning boss feet to head
+    const bossCenter = bossData.pos.clone().add(new THREE.Vector3(0, 1.5, 0)); // center of body
+    const bd    = raycaster.ray.distanceToPoint(bossCenter);
+    const along = raycaster.ray.origin.distanceTo(bossCenter);
+    if (bd < 1.5 && along > 0.3) {  // full body radius
       showHM();
       bossData.body.traverse(c => {
         if (c.isMesh && c.material) {
@@ -1771,36 +1989,48 @@ function shoot() {
           setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
         }
       });
-      damageBoss(1);
+      damageBoss(5);
     }
   }
-  if (ammo === 0) setTimeout(startReload, 320);
+  if (ammo === 0 && totalAmmo > 0) setTimeout(startReload, 320);
 }
 
 function startReload() {
-  if (reloading || ammo === maxAmmo) return;
+  if (reloading || ammo === maxAmmo || totalAmmo <= 0) return;
   reloading = true; reloadT = 0;
   document.getElementById('rui').style.display = 'flex';
+  if (sfxReload) { const s = sfxReload.cloneNode(); s.volume = 0.9; s.play().catch(()=>{}); }
   // Play reload animation
-  if (revolverMixer && revolverActions['reload']) {
+  if (revolverMixer) {
+    // Stop fire if playing
+    if (revolverActions['fire']) revolverActions['fire'].stop();
     const idle   = revolverActions['idle'];
-    const reload = revolverActions['reload'];
-    reload.reset();
-    reload.setLoop(THREE.LoopOnce, 1);
-    reload.clampWhenFinished = true;
-    if (idle) reload.crossFadeFrom(idle, 0.1, true);
-    reload.play();
-    const onReloadDone = (ev) => {
-      if (ev.action !== reload) return;
-      revolverMixer.removeEventListener('finished', onReloadDone);
-      if (idle) { idle.reset(); idle.crossFadeFrom(reload, 0.1, true); idle.play(); }
-    };
-    revolverMixer.addEventListener('finished', onReloadDone);
+    // Use reload_full if out of ammo completely, reload_easy otherwise
+    const reload = (ammo === 0 && revolverActions['reload_full'])
+                 ? revolverActions['reload_full']
+                 : revolverActions['reload_easy'];
+    if (reload) {
+      reload.stop();
+      reload.reset();
+      reload.enabled = true;
+      reload.timeScale = 1.0;
+      if (idle && idle.isRunning()) reload.crossFadeFrom(idle, 0.1, true);
+      reload.play();
+      const onReloadDone = (ev) => {
+        if (ev.action !== reload) return;
+        revolverMixer.removeEventListener('finished', onReloadDone);
+        reload.stop();
+        if (idle) { idle.reset(); idle.crossFadeFrom(reload, 0.15, true); idle.setLoop(THREE.LoopRepeat, Infinity); idle.play(); }
+      };
+      revolverMixer.addEventListener('finished', onReloadDone);
+    }
   }
 }
+
 // =====================================================
-//  BOSS SYSTEM
+//  BOSS SYSTEM with CHARGING and EVADING
 // =====================================================
+
 function spawnBoss() {
   if (!bossTemplate || bossActive) return;
 
@@ -1848,8 +2078,16 @@ function spawnBoss() {
     attackT: 0,
     attackState: null,
     dead: false,
-    phase: 1,        // 1=normal, 2=enraged (<50% hp), 3=berserk (<25% hp)
+    phase: 1,
     dyingUntil: null,
+    // NEW EVADE/CHARGE PROPERTIES
+    hasEvaded: false,      // first shot always triggers evade
+    isEvading: false,      // currently playing evade anim
+    isSprinting: false,    // currently sprinting at player
+    isJumping: false,      // currently doing jump attack
+    evadeCooldown: 0,      // time until can evade again
+    sprintCooldown: 0,     // time until can sprint again
+    evadeDir: new THREE.Vector3(), // direction of sidestep
   };
 
   bossActive = true;
@@ -1882,8 +2120,151 @@ function updateBossHUD() {
   document.getElementById('bossHpFill').style.background = color;
 }
 
+// NEW: Trigger boss evade (first shot dodge)
+function triggerBossEvade(pp) {
+  if (!bossData || bossData.dead || bossData.isEvading || bossData.isSprinting) return;
+  
+  bossData.hasEvaded = true;
+  bossData.isEvading = true;
+  bossData.attackState = null;
+  bossData.evadeCooldown = 3.0; // Can't evade again for 3 seconds
+
+  // Pick random sidestep direction (perpendicular to player)
+  const toP = new THREE.Vector3(pp.x - bossData.pos.x, 0, pp.z - bossData.pos.z).normalize();
+  const side = new THREE.Vector3(-toP.z, 0, toP.x); // 90 degrees
+  bossData.evadeDir = (Math.random() < 0.5 ? side : side.clone().negate()).normalize();
+
+  // Stop any current animation
+  bossData.mixer.stopAllAction();
+
+  // Play evade animation if available, otherwise just sidestep
+  if (bossEvadeClip) {
+    const ea = bossData.mixer.clipAction(bossEvadeClip);
+    ea.reset();
+    ea.setLoop(THREE.LoopOnce, 1);
+    ea.clampWhenFinished = true;
+    ea.timeScale = 1.2;
+    ea.play();
+
+    // After evade animation, trigger sprint
+    bossData.mixer.addEventListener('finished', function onEvadeDone(ev) {
+      if (ev.action !== ea) return;
+      bossData.mixer.removeEventListener('finished', onEvadeDone);
+      if (!bossData || bossData.dead) return;
+      bossData.isEvading = false;
+      // Only charge after the FIRST evade (first shot response)
+      if (bossData.sprintCooldown <= 0) {
+        triggerBossSprint();
+      }
+    });
+  } else {
+    // No animation - just sidestep and sprint
+    bossData.pos.x += bossData.evadeDir.x * 3;
+    bossData.pos.z += bossData.evadeDir.z * 3;
+    bossData.isEvading = false;
+    triggerBossSprint();
+  }
+
+  // Announce dodge
+  const el = document.getElementById('wmsg');
+  el.textContent = '⚡ BOSS DODGED! ⚡';
+  el.style.color = '#ffaa00';
+  el.style.opacity = 1;
+  setTimeout(() => { el.style.opacity = 0; }, 1500);
+
+  console.log('BOSS EVADED! 💨');
+}
+
+// NEW: Trigger boss sprint/charge
+function triggerBossSprint() {
+  if (!bossData || bossData.dead || bossData.isSprinting) return;
+
+  bossData.isSprinting = true;
+  bossData.attackState = null;
+  bossData.sprintCooldown = 5.0; // Can't sprint again for 5 seconds
+
+  // Store original speed for later reset
+  bossData.originalSpeed = bossData.speed;
+  bossData.speed = 12.0; // SUPER FAST CHARGE!
+
+  // Play sprint animation if available
+  if (bossSprintClip) {
+    bossData.mixer.stopAllAction();
+    const sa = bossData.mixer.clipAction(bossSprintClip);
+    sa.reset();
+    sa.setLoop(THREE.LoopRepeat, Infinity);
+    sa.timeScale = 1.3;
+    sa.play();
+  }
+
+  // Announce charge
+  const el = document.getElementById('wmsg');
+  el.textContent = '💥 BOSS CHARGING! 💥';
+  el.style.color = '#ff6600';
+  el.style.opacity = 1;
+  setTimeout(() => { el.style.opacity = 0; }, 2000);
+
+  console.log('BOSS SPRINTING! 🏃💨');
+}
+
+// MODIFIED: damageBoss with first-shot evade
+function triggerBossJump() {
+  if (!bossData || bossData.dead || bossData.isJumping || bossData.isSprinting || bossData.isEvading) return;
+  bossData.isJumping = true;
+  bossData.attackState = null;
+
+  if (bossJumpClip) {
+    bossData.mixer.stopAllAction();
+    const ja = bossData.mixer.clipAction(bossJumpClip);
+    ja.reset();
+    ja.setLoop(THREE.LoopOnce, 1);
+    ja.clampWhenFinished = true;
+    ja.timeScale = 1.1;
+    ja.play();
+
+    bossData.mixer.addEventListener('finished', function onJumpDone(ev) {
+      if (ev.action !== ja) return;
+      bossData.mixer.removeEventListener('finished', onJumpDone);
+      if (!bossData || bossData.dead) return;
+      bossData.isJumping = false;
+      // Deal damage on landing
+      takeDmg(25);
+      dvigEl.style.opacity = 1;
+      setTimeout(() => dvigEl.style.opacity = 0, 500);
+      // Announce
+      const el = document.getElementById('wmsg');
+      el.textContent = '💀 BOSS JUMP ATTACK! 💀';
+      el.style.color = '#ff0000';
+      el.style.opacity = 1;
+      setTimeout(() => { el.style.opacity = 0; }, 1500);
+      // Resume walk
+      if (bossWalkClip) {
+        const wa = bossData.mixer.clipAction(bossWalkClip);
+        wa.enabled = true;
+        wa.setLoop(THREE.LoopRepeat, Infinity);
+        wa.crossFadeFrom(ja, 0.2, true);
+        wa.play();
+      }
+      bossData.attackT = 2.0; // cooldown before next attack
+    });
+  } else {
+    // No clip fallback
+    bossData.isJumping = false;
+    takeDmg(25);
+    bossData.attackT = 2.0;
+  }
+}
+
 function damageBoss(dmg) {
   if (!bossData || bossData.dead) return;
+
+  // FIRST SHOT ALWAYS TRIGGERS EVADE - no damage
+  if (!bossData.hasEvaded && !bossData.isEvading && !bossData.isSprinting) {
+    triggerBossEvade(playerPos.clone());
+    return; // Damage negated by dodge!
+  }
+
+  // Normal damage after first shot
   bossData.hp -= dmg;
   updateBossHUD();
 
@@ -1942,6 +2323,7 @@ function killBoss() {
   setTimeout(() => { el.style.color = ''; }, 4000);
 }
 
+// MODIFIED: updateBossAI with evade and sprint logic
 function updateBossAI(dt, elapsed, pp) {
   if (!bossData || bossData.dead) return;
 
@@ -1950,43 +2332,137 @@ function updateBossAI(dt, elapsed, pp) {
   if (!bossData.dead || (bossData.dyingUntil && now_s < bossData.dyingUntil)) {
     bossData.mixer.update(dt);
   }
-
   if (bossData.dead) return;
 
-  const toP  = new THREE.Vector3(pp.x - bossData.pos.x, 0, pp.z - bossData.pos.z);
+  // Update cooldowns
+  if (bossData.evadeCooldown > 0) bossData.evadeCooldown -= dt;
+  if (bossData.sprintCooldown > 0) bossData.sprintCooldown -= dt;
+
+  const toP = new THREE.Vector3(pp.x - bossData.pos.x, 0, pp.z - bossData.pos.z);
   const dist = toP.length();
 
   // Rotate toward player
   const targetAngle = Math.atan2(pp.x - bossData.pos.x, pp.z - bossData.pos.z);
   let da = targetAngle - bossData.mesh.rotation.y;
-  while (da >  Math.PI) da -= Math.PI * 2;
+  while (da > Math.PI) da -= Math.PI * 2;
   while (da < -Math.PI) da += Math.PI * 2;
   bossData.mesh.rotation.y += da * Math.min(1, dt * 6);
 
-  const BOSS_ATTACK_DIST = 2.2;
-  const BOSS_STOP_DIST   = 1.8;
+  // ----- JUMPING: skip all AI -----
+  if (bossData.isJumping) {
+    bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
+    return;
+  }
+
+  // ----- EVADING: Sidestep laterally -----
+  if (bossData.isEvading) {
+    const evadeSpeed = 7.0;
+    bossData.pos.x += bossData.evadeDir.x * evadeSpeed * dt;
+    bossData.pos.z += bossData.evadeDir.z * evadeSpeed * dt;
+    bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
+    bossData.bossLight.intensity = 3.0 + Math.sin(elapsed * 8) * 1.5; // Rapid flicker
+    return; // Skip all other AI while evading
+  }
+
+  // ----- SPRINTING: Charge straight at player -----
+  if (bossData.isSprinting) {
+    const CHARGE_DIST = 2.5; // Close enough to slam
+
+    if (dist > CHARGE_DIST) {
+      // Charge forward
+      const step = Math.min(bossData.speed * dt, dist - CHARGE_DIST);
+      const bdir = toP.clone().normalize();
+      bossData.pos.x += bdir.x * step;
+      bossData.pos.z += bdir.z * step;
+      bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
+      
+      // Screen shake effect when close
+      if (dist < 8) {
+        dvigEl.style.opacity = 0.3;
+        setTimeout(() => dvigEl.style.opacity = 0, 100);
+      }
+    } else {
+      // SLAM - reached player!
+      bossData.isSprinting = false;
+      bossData.speed = bossData.originalSpeed || 2.8 + wave * 0.15;
+
+      // Push player back HARD
+      const pushDir = toP.clone().normalize();
+      playerPos.x += pushDir.x * 8;
+      playerPos.z += pushDir.z * 8;
+      
+      // Clamp to world bounds
+      playerPos.x = Math.max(-WORLD * 0.5 + 1, Math.min(WORLD * 0.5 - 1, playerPos.x));
+      playerPos.z = Math.max(-WORLD * 0.5 + 1, Math.min(WORLD * 0.5 - 1, playerPos.z));
+
+      // MASSIVE DAMAGE + SCREEN EFFECTS
+      takeDmg(30);
+      dvigEl.style.opacity = 1;
+      setTimeout(() => dvigEl.style.opacity = 0, 600);
+
+      // Announce slam
+      const el = document.getElementById('wmsg');
+      el.textContent = '💢 BOSS SLAM! 💢';
+      el.style.color = '#ff0000';
+      el.style.opacity = 1;
+      setTimeout(() => { el.style.opacity = 0; }, 1500);
+
+      // Resume normal behavior — stop sprint anim then crossfade to walk
+      bossData.speed = bossData.originalSpeed || 2.8 + wave * 0.15;
+      if (bossSprintClip) {
+        const sa = bossData.mixer.clipAction(bossSprintClip);
+        sa.stop();
+      }
+      if (bossWalkClip) {
+        const wa = bossData.mixer.clipAction(bossWalkClip);
+        wa.enabled = true;
+        wa.setLoop(THREE.LoopRepeat, Infinity);
+        wa.reset();
+        wa.play();
+      }
+      bossData.attackT = 0.5; // Brief pause
+    }
+
+    // Flicker light during sprint
+    bossData.bossLight.intensity = 5.0 + Math.sin(elapsed * 15) * 2.5;
+    return; // Skip normal AI while sprinting
+  }
+
+  // ----- NORMAL AI (when not evading or sprinting) -----
+  const BOSS_ATTACK_DIST = 4.0;
+  const BOSS_STOP_DIST = 3.5;
+
+  // Jump attack when low HP and player is nearby
+  if (bossData.phase >= 3 && !bossData.isJumping && !bossData.attackState &&
+      dist < 10 && bossData.attackT <= 0 && Math.random() < 0.008) {
+    triggerBossJump();
+    return;
+  }
 
   // Walk toward player
-  if (dist > BOSS_STOP_DIST && !bossData.attackState) {
+  if (dist > BOSS_ATTACK_DIST && !bossData.attackState) {
     const maxStep = dist - BOSS_STOP_DIST;
     const step = Math.min(bossData.speed * dt, maxStep);
-    const dir = toP.clone().normalize().multiplyScalar(step);
-    bossData.pos.x += dir.x;
-    bossData.pos.z += dir.z;
+    const bwdir = toP.clone().normalize();
+    bossData.pos.x += bwdir.x * step;
+    bossData.pos.z += bwdir.z * step;
 
     if (bossWalkClip) {
       const wa = bossData.mixer.clipAction(bossWalkClip);
-      if (!wa.isRunning()) { wa.reset(); wa.setLoop(THREE.LoopRepeat, Infinity); wa.play(); }
+      if (!wa.isRunning()) {
+        wa.reset();
+        wa.setLoop(THREE.LoopRepeat, Infinity);
+        wa.play();
+      }
     }
   }
   bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
 
-  // Attack pattern — alternates punch/swipe, combos in berserk phase
+  // Attack pattern
   if (dist < BOSS_ATTACK_DIST) {
     if (bossData.attackT > 0) bossData.attackT -= dt;
 
     if (bossData.attackT <= 0 && !bossData.attackState) {
-      // Pick attack based on phase
       const pool = bossData.phase >= 2
         ? [bossPunchClip, bossSwipeClip, bossSwipeClip].filter(Boolean)
         : [bossPunchClip, bossSwipeClip].filter(Boolean);
@@ -2003,7 +2479,6 @@ function updateBossAI(dt, elapsed, pp) {
         aa.play();
         bossData.attackState = aa;
 
-        // Boss hits harder than zombies
         const dmgAmt = bossData.phase === 3 ? 18 : bossData.phase === 2 ? 12 : 8;
         setTimeout(() => { if (!bossData?.dead) takeDmg(dmgAmt); }, clip.duration * 0.45 * 1000);
 
@@ -2012,12 +2487,17 @@ function updateBossAI(dt, elapsed, pp) {
           bossData.mixer.removeEventListener('finished', onDone);
           if (!bossData || bossData.dead) return;
           bossData.attackState = null;
-          // Shorter cooldown when enraged
-          bossData.attackT = bossData.phase >= 3 ? 0.1 : bossData.phase === 2 ? 0.3 : 0.6;
+          bossData.attackT = 0;
+          if (bossWalkClip) {
+            const wa = bossData.mixer.clipAction(bossWalkClip);
+            wa.reset();
+            wa.setLoop(THREE.LoopRepeat, Infinity);
+            wa.crossFadeFrom(aa, 0.2, true);
+            wa.play();
+          }
         };
         bossData.mixer.addEventListener('finished', onDone);
       } else {
-        // No clip fallback
         takeDmg(8);
         bossData.attackT = 1.0;
       }
@@ -2026,7 +2506,7 @@ function updateBossAI(dt, elapsed, pp) {
     bossData.attackT = 0;
   }
 
-  // Pulsing glow
+  // Normal pulsating glow
   bossData.bossLight.intensity = 3.0 + Math.sin(elapsed * 2.5) * 0.8;
 }
 
@@ -2072,6 +2552,7 @@ function takeDmg(d) {
 }
 function die() {
   gameRunning = false; document.exitPointerLock();
+  if (sfxAmbient) { sfxAmbient.pause(); sfxAmbient.currentTime = 0; }
   dsEl.style.display = 'flex';
   document.getElementById('fs').textContent = 'SCORE: ' + score + '  |  WAVE: ' + wave;
 }
@@ -2091,6 +2572,11 @@ function updateHUD() {
   document.getElementById('svs').textContent   = score;
   document.getElementById('svw').textContent   = wave;
   document.getElementById('anum').textContent  = reloading ? '--' : ammo;
+  const totalEl = document.getElementById('atotal');
+  if (totalEl) totalEl.textContent = '/ ' + totalAmmo;
+  // Flash red when out of ammo
+  const anumEl = document.getElementById('anum');
+  if (anumEl) anumEl.style.color = (ammo === 0 && activeWeapon === 'revolver') ? '#ff4444' : '#aaffbb';
 }
 
 // =====================================================
@@ -2100,7 +2586,7 @@ function trackFPS(now) {
   fpsFrames++;
   if (now - lastFPSTime > 1000) {
     const fps = fpsFrames / ((now-lastFPSTime)/1000);
-    document.getElementById('fps').textContent = Math.round(fps) + ' FPS';
+    if(_fpsel) _fpsel.textContent = Math.round(fps) + ' FPS';
     fpsHistory.push(fps); if (fpsHistory.length>5) fpsHistory.shift();
     if (fpsHistory.length >= 4) {
       const avg = fpsHistory.reduce((a,b)=>a+b,0)/fpsHistory.length;
@@ -2115,14 +2601,16 @@ function trackFPS(now) {
 //  GAME INIT
 // =====================================================
 function initGame() {
-  health=100; ammo=maxAmmo; score=0; wave=1; stamina=100;
-  reloading=false; reloadT=0;
+  health=100; ammo=maxAmmo; totalAmmo=48; score=0; wave=1; stamina=100;
+  if (sfxAmbient) { sfxAmbient.currentTime = 0; sfxAmbient.play().catch(()=>{}); }
+  lastShotTime=0; reloading=false; reloadT=0;
   waveEnemies.forEach(e => scene.remove(e.mesh));
   waveEnemies=[]; waveSpawned=0; waveTotal=5; waveLeft=5; waveAT=0; spawnAccum=0;
   // Reset boss
   if (bossData) { scene.remove(bossData.mesh); bossData = null; }
   bossActive = false;
   document.getElementById('bossHud').style.display = 'none';
+  ammoPickups.forEach(p => { p.active = true; p.mesh.visible = true; if(p.glow) p.glow.intensity = 0.8; });
   yaw=0; pitch=0; playerPos.set(0,PH,0);
   clock = new THREE.Clock();
   flashlight.intensity=8; flOn=true;
@@ -2139,6 +2627,13 @@ function getSpawnInterval() { return Math.max(1.6, 5.5 - wave*.4); }
 // =====================================================
 //  MAIN LOOP
 // =====================================================
+// Reusable vectors — allocated once, reused every frame (no GC pressure)
+const _fwd   = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _move  = new THREE.Vector3();
+const _toP   = new THREE.Vector3();
+const _pp    = new THREE.Vector3();
+
 function loop() {
   animId = requestAnimationFrame(loop);
   const now = performance.now();
@@ -2159,17 +2654,35 @@ function loop() {
   const wantRun = (keys['ShiftLeft']||keys['ShiftRight']) && stamina>5;
   const spd = wantRun ? PR : PS;
   stamina = wantRun ? Math.max(0,stamina-dt*28) : Math.min(100,stamina+dt*16);
-  document.getElementById('sfill').style.width = stamina+'%';
+  // Only update stamina bar when it changes by >1% to reduce style recalc
+  const staminaInt = stamina|0;
+  if (_sfill && staminaInt !== (_sfill._last|0)) { _sfill.style.width=staminaInt+'%'; _sfill._last=staminaInt; }
 
-  const fwd   = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-  const right = new THREE.Vector3( Math.cos(yaw), 0, -Math.sin(yaw));
-  const move  = new THREE.Vector3();
-  if (keys['KeyW']||keys['ArrowUp'])    move.addScaledVector(fwd,   spd*dt);
-  if (keys['KeyS']||keys['ArrowDown'])  move.addScaledVector(fwd,  -spd*dt);
-  if (keys['KeyA']||keys['ArrowLeft'])  move.addScaledVector(right,-spd*dt);
-  if (keys['KeyD']||keys['ArrowRight']) move.addScaledVector(right, spd*dt);
-  const moving = move.lengthSq() > 0;
-  moveP(playerPos, move);
+  _fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  _right.set( Math.cos(yaw), 0, -Math.sin(yaw));
+  _move.set(0, 0, 0);
+  if (keys['KeyW']||keys['ArrowUp'])    _move.addScaledVector(_fwd,   spd*dt);
+  if (keys['KeyS']||keys['ArrowDown'])  _move.addScaledVector(_fwd,  -spd*dt);
+  if (keys['KeyA']||keys['ArrowLeft'])  _move.addScaledVector(_right,-spd*dt);
+  if (keys['KeyD']||keys['ArrowRight']) _move.addScaledVector(_right, spd*dt);
+  const moving = _move.lengthSq() > 0;
+  moveP(playerPos, _move);
+
+  // -- Ammo pickup collection --
+  for (const pk of ammoPickups) {
+    if (!pk.active) continue;
+    const dx = playerPos.x - pk.pos.x;
+    const dz = playerPos.z - pk.pos.z;
+    if (dx*dx + dz*dz < 1.8*1.8) { // within 1.8 units
+      pk.active = false;
+      pk.mesh.visible = false;
+      if (pk.glow) pk.glow.intensity = 0;
+      totalAmmo = Math.min(totalAmmo + 24, 120); // pickup gives 24 rounds, cap 120
+      updateHUD();
+      // Flash ammo counter green briefly
+      if (_anum) { _anum.style.color='#44ffaa'; setTimeout(()=>{ updateHUD(); }, 600); }
+    }
+  }
 
   // Head bob
   if (moving) { bobTime+=dt*(wantRun?14:9); bobAmt=Math.min(1,bobAmt+dt*4); }
@@ -2190,11 +2703,87 @@ function loop() {
   gunCamera.updateMatrixWorld(true);
 
   // Gun bob + recoil spring
-  gunPivot.rotation.x += (0-gunPivot.rotation.x) * .14;
+  gunPivot.rotation.x += (0-gunPivot.rotation.x) * .13;
   if (revolverModel) {
-    gunPivot.position.x  = 0.18 + Math.sin(bobTime*.5)*bobAmt*.009;
-    gunPivot.position.y  = -0.16 + Math.sin(bobTime)*bobAmt*.014 + Math.sin(elapsed*.7)*.002;
+  // SLIGHTLY RIGHT POSITION - classic FPS offset
+  gunPivot.position.x  = 0.12 + Math.sin(bobTime*.5)*bobAmt*.012;  // Base offset 0.12
+  gunPivot.position.y  = -0.45 + Math.sin(bobTime)*bobAmt*.018 + Math.sin(elapsed*.7)*.003;
+  gunPivot.position.z  = -0.14;  // Pulled slightly closer
+  
+  // Make the gun model itself larger
+  if (gunGroup) {
+    gunGroup.scale.setScalar(1.2);  // 20% larger than default
+    
+    
+    let hasGripCap = false;
+    gunGroup.children.forEach(child => {
+      if (child.userData && child.userData.isGripCap) hasGripCap = true;
+    });
+    
+    if (!hasGripCap) {
+      // Main grip cap - covers the open end
+      const gripCapGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.16, 8);
+      const gripCapMat = new THREE.MeshLambertMaterial({ 
+        color: 0x4a2e1a,  // Dark brown
+        emissive: 0x0a0500 // Slight dark emission to blend with shadows
+      });
+      const gripCap = new THREE.Mesh(gripCapGeo, gripCapMat);
+      
+      // Position at the open end of the grip (adjust these values as needed)
+      gripCap.position.set(0.0, -0.24, 0.15);
+      gripCap.rotation.set(0, 0, 0);
+      gripCap.userData = { isGripCap: true };
+      gunGroup.add(gripCap);
+      
+      // Inner darker cap for depth
+      const innerCapGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.14, 6);
+      const innerCapMat = new THREE.MeshLambertMaterial({ 
+        color: 0x2a1a0a,  // Darker brown
+        emissive: 0x050200
+      });
+      const innerCap = new THREE.Mesh(innerCapGeo, innerCapMat);
+      innerCap.position.set(0.0, -0.24, 0.18);
+      innerCap.rotation.set(0, 0, 0);
+      innerCap.userData = { isGripCap: true };
+      gunGroup.add(innerCap);
+      
+      // Decorative ring/plate to make it look intentional
+      const ringGeo = new THREE.TorusGeometry(0.16, 0.02, 6, 12);
+      const ringMat = new THREE.MeshLambertMaterial({ color: 0x884422 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.set(0.0, -0.24, 0.15);
+      ring.rotation.set(Math.PI/2, 0, 0);
+      ring.userData = { isGripCap: true };
+      gunGroup.add(ring);
+      
+      // Screw/rivet details to make it look like a grip plate
+      const screwMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa });
+      const screwGeo = new THREE.SphereGeometry(0.02, 5);
+      
+      const screw1 = new THREE.Mesh(screwGeo, screwMat);
+      screw1.position.set(-0.06, -0.28, 0.16);
+      screw1.userData = { isGripCap: true };
+      gunGroup.add(screw1);
+      
+      const screw2 = new THREE.Mesh(screwGeo, screwMat);
+      screw2.position.set(0.06, -0.28, 0.16);
+      screw2.userData = { isGripCap: true };
+      gunGroup.add(screw2);
+      
+      const screw3 = new THREE.Mesh(screwGeo, screwMat);
+      screw3.position.set(-0.06, -0.20, 0.16);
+      screw3.userData = { isGripCap: true };
+      gunGroup.add(screw3);
+      
+      const screw4 = new THREE.Mesh(screwGeo, screwMat);
+      screw4.position.set(0.06, -0.20, 0.16);
+      screw4.userData = { isGripCap: true };
+      gunGroup.add(screw4);
+      
+      console.log("Added grip cap to cover open end");
+    }
   }
+}
   if (fistsGroup && fistsGroup.visible) {
     fistsGroup.position.x = Math.sin(bobTime*.5)*bobAmt*.04;
     fistsGroup.position.y = -1.1 + Math.sin(bobTime)*bobAmt*.025 + Math.sin(elapsed*.7)*.004;
@@ -2211,12 +2800,20 @@ function loop() {
   if (reloading) {
     reloadT += dt;
     const p = Math.min(1, reloadT/reloadDur);
-    document.getElementById('rprog').style.width = (p*100)+'%';
-    if (p >= 1) { reloading=false; ammo=maxAmmo; document.getElementById('rui').style.display='none'; updateHUD(); }
+    if(_rprog) _rprog.style.width = (p*100)+'%';
+    if (p >= 1) {
+      const needed = maxAmmo - ammo;
+      const fill   = Math.min(needed, totalAmmo);
+      ammo      += fill;
+      totalAmmo -= fill;
+      reloading  = false;
+      if(_rui) _rui.style.display='none';
+      updateHUD();
+    }
   }
 
   // -- Wave announce --
-  if (waveAT > 0) { waveAT-=dt; if(waveAT<=0) document.getElementById('wmsg').style.opacity=0; }
+  if (waveAT > 0) { waveAT-=dt; if(waveAT<=0 && _wmsg) _wmsg.style.opacity=0; }
 
   // -- Spawn enemies --
   if (waveSpawned < waveTotal) {
@@ -2237,37 +2834,41 @@ function loop() {
   }
 
   // -- Boss AI --
-  updateBossAI(dt, elapsed, playerPos.clone());
+  updateBossAI(dt, elapsed, _pp);
 
   // -- Enemy AI --
-  const pp = playerPos.clone();
+  _pp.copy(playerPos);
   for (const e of waveEnemies) {
     if (e.dead) continue;
-    const toP  = new THREE.Vector3(pp.x-e.pos.x, 0, pp.z-e.pos.z);
-    const dist = toP.length();
+    _toP.set(_pp.x-e.pos.x, 0, _pp.z-e.pos.z);
+    const dist = _toP.length();
 
     // Smoothly rotate the PIVOT toward player (not the animated FBX body)
-    const targetAngle = Math.atan2(pp.x-e.pos.x, pp.z-e.pos.z);
+    const targetAngle = Math.atan2(_pp.x-e.pos.x, _pp.z-e.pos.z);
     let da = targetAngle - e.mesh.rotation.y;
     // Wrap angle to [-PI, PI]
     while (da > Math.PI)  da -= Math.PI*2;
     while (da < -Math.PI) da += Math.PI*2;
     e.mesh.rotation.y += da * Math.min(1, dt * 8);
 
-    const ATTACK_DIST = 1.5; // ~1 unit gap
-    const STOP_DIST   = 1.2; // stop just before swing range
+    const ATTACK_DIST = 2.8; // start attacking at this range
+    const STOP_DIST   = 2.5; // stop walking here permanently until player moves away
 
-    if (dist < 35) {
-      // Walk only when outside stop range and not mid-attack
-      if (dist > STOP_DIST && !e.attackState) {
+    if (dist < 999) {
+      // Always chase player — full map detection — once inside, never move forward again
+      if (dist > ATTACK_DIST && !e.attackState) {
         // Clamp step so zombie never overshoots -- can move AT MOST (dist - STOP_DIST)
         const maxStep = dist - STOP_DIST;
         const step = Math.min(e.speed * dt, maxStep);
-        moveE(e.pos, toP.clone().normalize().multiplyScalar(step));
-        // Resume walk anim only when actually walking (outside attack range)
-        if (e.mixer && walkAnimClip && dist > ATTACK_DIST) {
+        moveE(e.pos, _toP.clone().normalize().multiplyScalar(step));
+        // Resume walk anim — ensure it's running whenever zombie is moving
+        if (e.mixer && walkAnimClip && !e.attackState) {
           const wa = e.mixer.clipAction(walkAnimClip);
-          if (!wa.isRunning()) { wa.reset(); wa.setLoop(THREE.LoopRepeat, Infinity); wa.play(); }
+          if (!wa.isRunning()) {
+            wa.enabled = true;
+            wa.setLoop(THREE.LoopRepeat, Infinity);
+            wa.play();
+          }
         }
       }
       e.mesh.position.set(e.pos.x, 0, e.pos.z);
@@ -2278,38 +2879,44 @@ function loop() {
 
         // Attack immediately when in range and cooldown is done and not mid-swing
         if (e.attackT <= 0 && !e.attackState) {
+          // Strict alternating loop: attack1 → attack2 → attack1 → ...
+          // e.attackIndex tracks which clip fires next (initialised to 0 in createEnemy)
+          if (e.attackIndex === undefined) e.attackIndex = 0;
           const clips = [attack1Clip, attack2Clip].filter(Boolean);
-          const clip  = clips.length ? clips[Math.floor(Math.random()*clips.length)] : null;
+          const clip  = clips.length ? clips[e.attackIndex % clips.length] : null;
           if (e.mixer && clip) {
-            const walkAction   = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
+            const prevClip  = clips.length > 1 ? clips[(e.attackIndex + clips.length - 1) % clips.length] : null;
+            const prevAction = prevClip ? e.mixer.clipAction(prevClip) : null;
+            const walkAction = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
             const attackAction = e.mixer.clipAction(clip);
 
-            if (walkAction && !walkAction.isRunning()) {
-              walkAction.reset();
-              walkAction.setLoop(THREE.LoopRepeat, Infinity);
-              walkAction.play();
+            // Fade from whichever was last playing (prev attack or walk)
+            const fromAction = (prevAction && prevAction.isRunning()) ? prevAction : walkAction;
+            if (fromAction && !fromAction.isRunning()) {
+              fromAction.enabled = true;
+              fromAction.setLoop(THREE.LoopRepeat, Infinity);
+              fromAction.play();
             }
 
             attackAction.reset();
             attackAction.setLoop(THREE.LoopOnce, 1);
             attackAction.clampWhenFinished = true;
             attackAction.timeScale = 1.0;
-            if (walkAction) attackAction.crossFadeFrom(walkAction, 0.1, true);
+            if (fromAction) attackAction.crossFadeFrom(fromAction, 0.08, true);
             attackAction.play();
             e.attackState = attackAction;
+            e.attackIndex++;
 
             // Deal damage at swing midpoint
             setTimeout(() => { if (!e.dead) takeDmg(2); }, clip.duration * 0.45 * 1000);
 
-            // When attack animation finishes: clear state, set cooldown, resume walk
+            // Chain directly into next attack — no walk resume, no gap
             const onFinished = (ev) => {
               if (ev.action !== attackAction) return;
               e.mixer.removeEventListener('finished', onFinished);
               if (e.dead) return;
               e.attackState = null;
-              e.attackT = 0; // ready to attack again immediately -- no walk resume
-              // Don't resume walk here -- next frame AI will either attack again
-              // (still in range) or resume walk (out of range). No crossfade = no lurch.
+              e.attackT = 0; // fire next attack immediately next frame
             };
             e.mixer.addEventListener('finished', onFinished);
           } else {
@@ -2319,7 +2926,20 @@ function loop() {
           }
         }
       } else {
-        e.attackT = 0; // reset cooldown when out of range
+        // Player moved out of attack range — stop any active attack anim cleanly
+        if (e.attackState) {
+          const wa = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
+          const aa = e.attackState;
+          e.attackState = null;
+          e.attackT = 0;
+          if (wa) {
+            wa.enabled = true;
+            wa.setLoop(THREE.LoopRepeat, Infinity);
+            wa.crossFadeFrom(aa, 0.2, true);
+            wa.play();
+          }
+        }
+        e.attackT = 0;
       }
     } else {
       e.roamT+=dt;
