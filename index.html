@@ -2085,6 +2085,7 @@ function spawnBoss() {
     isEvading: false,      // currently playing evade anim
     isSprinting: false,    // currently sprinting at player
     isJumping: false,      // currently doing jump attack
+    jumpTarget: null,      // world pos to leap toward
     evadeCooldown: 0,      // time until can evade again
     sprintCooldown: 0,     // time until can sprint again
     evadeDir: new THREE.Vector3(), // direction of sidestep
@@ -2212,6 +2213,10 @@ function triggerBossJump() {
   if (!bossData || bossData.dead || bossData.isJumping || bossData.isSprinting || bossData.isEvading) return;
   bossData.isJumping = true;
   bossData.attackState = null;
+  // Capture player position as leap target
+  bossData.jumpTarget = playerPos.clone();
+  bossData.jumpDuration = bossJumpClip ? (bossJumpClip.duration / 1.1) : 1.0;
+  bossData.jumpElapsed = 0;
 
   if (bossJumpClip) {
     bossData.mixer.stopAllAction();
@@ -2227,8 +2232,11 @@ function triggerBossJump() {
       bossData.mixer.removeEventListener('finished', onJumpDone);
       if (!bossData || bossData.dead) return;
       bossData.isJumping = false;
-      // Deal damage on landing
-      takeDmg(25);
+      // Deal damage only if boss landed close enough
+      const jdx = playerPos.x - bossData.pos.x;
+      const jdz = playerPos.z - bossData.pos.z;
+      const jumpDist = Math.sqrt(jdx*jdx + jdz*jdz);
+      if (jumpDist < 4.0) takeDmg(25);
       dvigEl.style.opacity = 1;
       setTimeout(() => dvigEl.style.opacity = 0, 500);
       // Announce
@@ -2348,12 +2356,6 @@ function updateBossAI(dt, elapsed, pp) {
   while (da < -Math.PI) da += Math.PI * 2;
   bossData.mesh.rotation.y += da * Math.min(1, dt * 6);
 
-  // ----- JUMPING: skip all AI -----
-  if (bossData.isJumping) {
-    bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
-    return;
-  }
-
   // ----- EVADING: Sidestep laterally -----
   if (bossData.isEvading) {
     const evadeSpeed = 7.0;
@@ -2432,10 +2434,10 @@ function updateBossAI(dt, elapsed, pp) {
   const BOSS_ATTACK_DIST = 4.0;
   const BOSS_STOP_DIST = 3.5;
 
-  // Jump attack when low HP and player is nearby
-  if (bossData.phase >= 3 && !bossData.isJumping && !bossData.attackState &&
-      dist < 10 && bossData.attackT <= 0 && Math.random() < 0.008) {
-    triggerBossJump();
+  // Low HP rage charge — sprint toward player when in phase 3
+  if (bossData.phase >= 3 && !bossData.isSprinting && bossData.sprintCooldown <= 0 &&
+      dist > BOSS_ATTACK_DIST && dist < 20) {
+    triggerBossSprint();
     return;
   }
 
