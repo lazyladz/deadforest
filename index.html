@@ -204,14 +204,23 @@ const PATHS = {
   groundAlbedo: 'patchy-meadow1-unity/patchy-meadow1_albedo.png',
   groundNormal: 'patchy-meadow1-unity/patchy-meadow1_normal-ogl.png',
   revolver:     'fps_pistol_animations.glb',
+  saiga:        'fps_saiga_animations.glb',
   fists:        'fists_2025__first_person_animations.glb',
   oldHouse:     'old_house/old_house.glb',
   rock:         'rock_boulder_2_game_ready_asset.glb',
   woodenLogs:   'wooden_logs_-_asset_pack.glb',
   ammoBox:      '9mm_ammo_box.glb',
   damageAnim:   'Zombie_Reaction_Hit__1_.fbx',
+  tankFbx:      'tankwalk.fbx',
+  tankWalk:     'tankwalk.fbx',
+  tankAtk1:     'tankattack1.fbx',
+  tankAtk2:     'tankattack2.fbx',
+  tankDeath:    'tankdying.fbx',
+  tankDamage:   'tankdamagereaction.fbx',
   rockBoulder:  'rock_boulder_2_game_ready_asset.glb',
   sfxGunshot:   'gunshot.mp3',
+  sfxSaigaFire:   'shotgunfire.mp3',
+  sfxSaigaReload: 'shotgunreload.mp3',
   sfxReload:    'reload.mp3',
   sfxAmbient:   'Eerie_Ambient_Sounds_I_Recorded__spooky___320_.mp3',
 
@@ -229,8 +238,13 @@ const PATHS = {
 let renderer, scene, camera, clock;
 let gameRunning = false, pointerLocked = false, animId = null;
 let sfxGunshot = null, sfxReload = null, sfxAmbient = null;
+let sfxSaigaFire = null, sfxSaigaReload = null;
 let health=100, ammo=12, maxAmmo=12, totalAmmo=48, score=0, wave=1;
 let lastShotTime = 0;
+let playerNoclipUntil = 0; // noclip after boss push so player can't get stuck
+let saigaLastShot = 0;
+let saigaAmmo = 15, saigaMaxAmmo = 15;
+let saigaPumping = false;
 const SHOT_COOLDOWN = 0.35; // seconds between shots (semi-auto feel)
 let reloading=false, reloadT=0, reloadDur=1.8;
 let waveEnemies=[], waveSpawned=0, waveTotal=5, waveLeft=5, waveAT=0;
@@ -246,11 +260,15 @@ let gunPivot, gunGroup, muzzleLight;
 let revolverModel = null;
 let revolverMixer = null;
 let revolverActions = {};  // pullout, idle, shoot, reload
+let saigaModel = null;
+let saigaMixer = null;
+let saigaActions = {};
+let saigaPivot = null;
 let fistsModel = null;
 let fistsMixer = null;
 let fistsActions = {};
 let fistsGroup = null;
-let activeWeapon = 'fists'; // 'revolver' or 'fists'
+let activeWeapon = 'fists'; // 'revolver', 'fists', or 'saiga'
 let punchAlternate = false; // alternate L/R punches
 let houseTemplate = null;
 let rockTemplate  = null;
@@ -261,7 +279,13 @@ let bobTime=0, bobAmt=0;
 const collidables = [];
 let QUALITY = 'HIGH';
 let pointLights = [];
-let zombieTemplate  = null;  // the loaded FBX object
+let zombieTemplate  = null;
+  let tankTemplate    = null;
+  let tankWalkClip    = null;
+  let tankAtk1Clip    = null;
+  let tankAtk2Clip    = null;
+  let tankDeathClip   = null;
+  let tankDamageClip  = null;  // the loaded FBX object
 let walkAnimClip    = null;  // walk animation extracted from Walk Forward.fbx
 let deathAnimClip   = null;  // death animation
 let attack1Clip     = null;  // Zombie Attack 1 (Zombie_Punching)
@@ -457,6 +481,16 @@ async function boot() {
     console.log('Revolver loaded OK, anims:', revolverGLTF.animations.map(a=>a.name).join(', '));
   } catch(e) { console.warn('Revolver failed:', e.message); }
 
+  setLoad(86, 'Loading saiga...');
+  try {
+    const saigaGLTF = await new Promise((res,rej) =>
+      new THREE.GLTFLoader().load(PATHS.saiga, res, undefined, rej)
+    );
+    saigaModel = saigaGLTF.scene;
+    saigaModel.animations = saigaGLTF.animations;
+    console.log('Saiga loaded OK, anims:', saigaGLTF.animations.map(a=>a.name).join(', '));
+  } catch(e) { console.warn('Saiga failed to load:', e.message); }
+
   setLoad(87, 'Loading fists...');
   try {
     const fistsGLTF = await new Promise((res,rej) =>
@@ -606,6 +640,78 @@ async function boot() {
     }
   } catch(e) { console.warn('Damage anim failed:', e.message); }
 
+  // ── Load tank assets ──
+  setLoad(88, 'Loading tank model...');
+  try {
+    tankTemplate = await loadFBX(new THREE.FBXLoader(), PATHS.tankFbx);
+    tankTemplate.traverse(c => {
+      if (!c.isMesh) return;
+      c.castShadow = true; c.receiveShadow = true;
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m => { m.skinning = true; m.needsUpdate = true; });
+    });
+    // Scale tank to ~2.4 world units tall using geometry bbox (no scene needed)
+    {
+      let minY = Infinity, maxY = -Infinity;
+      tankTemplate.traverse(c => {
+        if (!c.isMesh || !c.geometry) return;
+        const pos = c.geometry.attributes.position;
+        if (!pos) return;
+        for (let i = 0; i < pos.count; i++) {
+          const y = pos.getY(i);
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      });
+      const th = maxY - minY;
+      if (th > 0) {
+        const s = 2.4 / th;
+        tankTemplate.scale.setScalar(s);
+        tankTemplate.userData.footY = -minY * s;
+      } else {
+        // FBX likely in cm — apply standard Mixamo cm→m fix
+        tankTemplate.scale.setScalar(0.01);
+        tankTemplate.userData.footY = 0;
+      }
+      console.log('Tank raw height:', (maxY-minY).toFixed(1), '→ scale applied');
+    }
+    // Walk clip from same file
+    if (tankTemplate.animations && tankTemplate.animations.length > 0) {
+      tankWalkClip = tankTemplate.animations[0];
+      tankWalkClip.tracks = tankWalkClip.tracks.filter(t => {
+        const n = t.name.toLowerCase();
+        return !((n.includes('hips')||n.includes(':root')||n==='position') && t.name.endsWith('.position'));
+      });
+    }
+    // Attack 1
+    const ta1 = await loadFBX(new THREE.FBXLoader(), PATHS.tankAtk1);
+    tankAtk1Clip = ta1.animations[0];
+    tankAtk1Clip.tracks = tankAtk1Clip.tracks.filter(t => {
+      const n = t.name.toLowerCase();
+      return !((n.includes('hips')||n.includes(':root')||n==='position') && t.name.endsWith('.position'));
+    });
+    // Attack 2
+    const ta2 = await loadFBX(new THREE.FBXLoader(), PATHS.tankAtk2);
+    tankAtk2Clip = ta2.animations[0];
+    tankAtk2Clip.tracks = tankAtk2Clip.tracks.filter(t => {
+      const n = t.name.toLowerCase();
+      return !((n.includes('hips')||n.includes(':root')||n==='position') && t.name.endsWith('.position'));
+    });
+    // Death
+    const tde = await loadFBX(new THREE.FBXLoader(), PATHS.tankDeath);
+    tankDeathClip = tde.animations[0];
+    // Strip ONLY mixamorigHips.position — this is what causes the tank to float
+    tankDeathClip.tracks = tankDeathClip.tracks.filter(t => t.name !== 'mixamorigHips.position');
+    // Damage reaction
+    const tdr = await loadFBX(new THREE.FBXLoader(), PATHS.tankDamage);
+    tankDamageClip = tdr.animations[0];
+    tankDamageClip.tracks = tankDamageClip.tracks.filter(t => {
+      const n = t.name.toLowerCase();
+      return !((n.includes('hips')||n.includes(':root')||n==='position') && t.name.endsWith('.position'));
+    });
+    console.log('Tank assets loaded OK');
+  } catch(e) { console.warn('Tank assets failed:', e.message); }
+
   // ── Load boss assets ──────────────────────────────────────────────
   setLoad(88, 'Loading boss model...');
   try {
@@ -704,6 +810,10 @@ async function boot() {
   try {
     sfxGunshot = new Audio(PATHS.sfxGunshot);
     sfxGunshot.preload = 'auto';
+    sfxSaigaFire = new Audio(PATHS.sfxSaigaFire);
+    sfxSaigaFire.preload = 'auto';
+    sfxSaigaReload = new Audio(PATHS.sfxSaigaReload);
+    sfxSaigaReload.preload = 'auto';
     sfxReload  = new Audio(PATHS.sfxReload);
     sfxReload.preload  = 'auto';
     sfxAmbient = new Audio(PATHS.sfxAmbient);
@@ -813,10 +923,14 @@ document.addEventListener('mousemove', e => {
 });
 document.addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyR' && gameRunning) startReload();
+  if (e.code === 'KeyR' && gameRunning) {
+    if (activeWeapon === 'saiga') startSaigaReload();
+    else startReload();
+  }
   if (e.code === 'KeyF' && gameRunning) toggleFL();
   if (e.code === 'Digit1') setWeapon('fists');
   if (e.code === 'Digit2') setWeapon('revolver');
+  if (e.code === 'Digit3') setWeapon('saiga');
 });
 document.addEventListener('keyup', e => keys[e.code] = false);
 document.addEventListener('mousedown', e => {
@@ -838,10 +952,8 @@ function initRenderer() {
   document.body.insertBefore(renderer.domElement, document.body.firstChild);
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    gunCamera.aspect = window.innerWidth / window.innerHeight;
-    gunCamera.updateProjectionMatrix();
+    if (camera) { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); }
+    if (gunCamera) { gunCamera.aspect = window.innerWidth / window.innerHeight; gunCamera.updateProjectionMatrix(); }
   });
 }
 
@@ -1661,6 +1773,40 @@ function buildGun() {
     gunCamera.add(fistsGroup);
   }
 
+  // ---- SAIGA ----
+  if (saigaModel) {
+    // Same structure as fists: use model directly, mixer on root, add to gunCamera
+    const sGun = saigaModel;
+
+    sGun.traverse(c => {
+      if (!c.isMesh) return;
+      c.castShadow = false;
+      c.receiveShadow = false;
+      c.frustumCulled = false;
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach(m => { if (m.map) m.map.encoding = THREE.sRGBEncoding; });
+    });
+
+    saigaMixer = new THREE.AnimationMixer(sGun);
+    saigaModel.animations.forEach(clip => {
+      const key = clip.name.split('|').pop().toLowerCase();
+      saigaActions[key] = saigaMixer.clipAction(clip);
+      console.log('Saiga clip:', clip.name, '→', key);
+    });
+    const idleKey = Object.keys(saigaActions).find(k => k.includes('idle'));
+    if (idleKey) { saigaActions[idleKey].setLoop(THREE.LoopRepeat, Infinity); saigaActions[idleKey].play(); }
+    const fireKey = Object.keys(saigaActions).find(k => k.includes('fire'));
+    if (fireKey) { saigaActions[fireKey].setLoop(THREE.LoopOnce, 1); saigaActions[fireKey].clampWhenFinished = true; }
+
+    // Position like revolver — same FPS offset, revolver scale is confirmed working
+    saigaPivot = new THREE.Group();
+    saigaPivot.add(sGun);
+    saigaPivot.scale.setScalar(1.0); // no scale — FPS arms GLB already correct size
+    saigaPivot.visible = (activeWeapon === 'saiga');
+    gunCamera.add(saigaPivot);
+    console.log('Saiga ready, clips:', Object.keys(saigaActions).join(', '));
+  }
+
   // Add gunPivot to gunCamera so it moves with the view
   gunCamera.add(gunPivot);
   gunPivot.visible = (activeWeapon === 'revolver');
@@ -1682,6 +1828,7 @@ function setWeapon(weapon) {
   if (activeWeapon === weapon) return;
   activeWeapon = weapon;
   if (gunPivot) gunPivot.visible = (activeWeapon === 'revolver');
+  if (saigaPivot) saigaPivot.visible = (activeWeapon === 'saiga');
   if (fistsGroup) fistsGroup.visible = (activeWeapon === 'fists');
   if (activeWeapon === 'fists' && fistsActions['rig|Equip']) {
     const idle = fistsActions['rig|Idle'];
@@ -1695,8 +1842,9 @@ function setWeapon(weapon) {
     };
     fistsMixer.addEventListener('finished', onDone);
   }
-  document.getElementById('albl').textContent = activeWeapon === 'fists' ? 'FISTS' : 'ROUNDS';
-  document.getElementById('anum').textContent  = activeWeapon === 'fists' ? '∞' : ammo;
+  const wlbl = activeWeapon === 'fists' ? 'FISTS' : activeWeapon === 'saiga' ? 'SHELLS' : 'ROUNDS';
+  document.getElementById('albl').textContent = wlbl;
+  updateHUD();
 }
 
 function toggleFL() {
@@ -1715,10 +1863,11 @@ function collide(pos, r) {
   return false;
 }
 function moveP(pos, delta) {
+  const noclip = performance.now() / 1000 < playerNoclipUntil;
   const nx = new THREE.Vector3(pos.x+delta.x, pos.y, pos.z);
-  if (!collide(nx, PRAD)) pos.x = nx.x;
+  if (noclip || !collide(nx, PRAD)) pos.x = nx.x;
   const nz = new THREE.Vector3(pos.x, pos.y, pos.z+delta.z);
-  if (!collide(nz, PRAD)) pos.z = nz.z;
+  if (noclip || !collide(nz, PRAD)) pos.z = nz.z;
   pos.x = Math.max(-WORLD*.5+1, Math.min(WORLD*.5-1, pos.x));
   pos.z = Math.max(-WORLD*.5+1, Math.min(WORLD*.5-1, pos.z));
 }
@@ -1747,62 +1896,61 @@ function createEnemy() {
   const speeds = [4.5, 6.0, 3.5];
   const hps    = [3,   2,   7  ];
 
-  // Use SkeletonUtils.clone -- the ONLY correct way to clone SkinnedMesh in Three.js r128
-  // Regular .clone(true) shares skeleton bones between instances which breaks animation
-  const zombieClone = zombieTemplate ? THREE.SkeletonUtils.clone(zombieTemplate) : null;
+  // Pick model + clips based on tier: 0=normal zombie, 1=fast zombie, 2=tank
+  // Only use tank model if it actually loaded — otherwise fall back to zombie so enemy is visible
+  const isTank = (tier === 2) && (tankTemplate !== null);
+  const srcTemplate = isTank ? tankTemplate : zombieTemplate;
+  const srcWalkClip = isTank ? tankWalkClip : walkAnimClip;
+
+  const enemyClone = srcTemplate ? THREE.SkeletonUtils.clone(srcTemplate) : null;
   let mixer = null;
 
-  if (zombieClone) {
-    // Set texture directly on the original material -- no clone, no replace
-    // This is the safest approach: skinning shader stays 100% intact
-    zombieClone.traverse(child => {
+  if (enemyClone) {
+    enemyClone.traverse(child => {
       if (!child.isMesh) return;
       child.castShadow    = true;
       child.receiveShadow = true;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach(m => {
-        // Embedded textures — keep existing material, just ensure skinning
-        m.skinning = true;
-        m.needsUpdate = true;
-      });
+      mats.forEach(m => { m.skinning = true; m.needsUpdate = true; });
     });
 
-    // Mixer on the cloned root -- SkeletonUtils.clone gives it its own skeleton
-    mixer = new THREE.AnimationMixer(zombieClone);
+    mixer = new THREE.AnimationMixer(enemyClone);
 
-    if (walkAnimClip) {
-      const action = mixer.clipAction(walkAnimClip);
+    if (srcWalkClip) {
+      const action = mixer.clipAction(srcWalkClip);
       action.setLoop(THREE.LoopRepeat, Infinity);
-      action.timeScale = [1.0, 1.5, 0.65][tier];
+      action.timeScale = isTank ? 0.7 : [1.0, 1.5, 0.65][tier];
       action.play();
     }
 
-    // Measure this clone's foot offset and lift it so feet sit at y=0 inside the pivot
-    const cloneBox = new THREE.Box3().setFromObject(zombieClone);
-    zombieClone.position.y = Math.max(0, -cloneBox.min.y);
+    // Tank scale is already normalized on the template
+
+    if (isTank && tankTemplate.userData.footY !== undefined) {
+      enemyClone.position.y = tankTemplate.userData.footY;
+    } else {
+      const cloneBox = new THREE.Box3().setFromObject(enemyClone);
+      enemyClone.position.y = Math.max(0, -cloneBox.min.y);
+    }
   }
 
-  // Wrap in a pivot Group -- rotate the GROUP not the animated FBX mesh
-  // This prevents rotation fighting with AnimationMixer bone transforms
   const pivot = new THREE.Group();
   pivot.position.set(sp.x, 0, sp.z);
-  if (zombieClone) pivot.add(zombieClone);
+  if (enemyClone) pivot.add(enemyClone);
 
-  // Eye glow light on the pivot
-  // Eye glow light on the pivot
-  const eyeLight = new THREE.PointLight(0xff2200, 1.0, 4);
-  eyeLight.position.set(0, 1.6, .2);
+  const eyeLight = new THREE.PointLight(isTank ? 0xff6600 : 0xff2200, 1.0, isTank ? 6 : 4);
+  eyeLight.position.set(0, isTank ? 2.2 : 1.6, .2);
   pivot.add(eyeLight);
 
   scene.add(pivot);
 
   const maxHp = hps[tier] + Math.floor(wave / 2);
   waveEnemies.push({
-    mesh:    pivot,       // pivot is what we move/rotate
-    body:    zombieClone, // the actual FBX mesh (animated)
+    mesh:    pivot,
+    body:    enemyClone,
     eyeLight, mixer,
+    isTank,
     pos:     sp.clone(),
-    footY:   0,           // pivot sits at y=0, footY baked into zombieClone.position.y
+    footY:   enemyClone ? enemyClone.position.y : 0, // body Y offset to keep feet on ground
     hp: maxHp, maxHp,
     speed:   speeds[tier] + wave * .28,
     roamDir: new THREE.Vector3(Math.random()-.5, 0, Math.random()-.5).normalize(),
@@ -1875,18 +2023,19 @@ function doPunch() {
           setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
         }
       });
-      damageBoss(10);
+      damageBoss(2);
     }
   }
 }
 
 function playDamageAnim(e) {
-  if (!e.mixer || !damageAnimClip || e.dead) return;
+  const hitClip = e.isTank ? tankDamageClip : damageAnimClip;
+  if (!e.mixer || !hitClip || e.dead) return;
   // Stop all current actions — hit reaction interrupts everything
   e.mixer.stopAllAction();
   if (e.attackState) e.attackState = null; // cancel attack mid-swing
   e.isHit = true; // freeze movement while reacting
-  const dmg = e.mixer.clipAction(damageAnimClip);
+  const dmg = e.mixer.clipAction(hitClip);
   dmg.reset();
   dmg.setLoop(THREE.LoopOnce, 1);
   dmg.clampWhenFinished = true;
@@ -1899,18 +2048,105 @@ function playDamageAnim(e) {
     if (e.dead) return;
     e.isHit = false; // unfreeze
     const walk = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
-    if (walk) {
-      walk.enabled = true;
-      walk.setLoop(THREE.LoopRepeat, Infinity);
-      walk.crossFadeFrom(dmg, 0.12, true);
-      walk.play();
+    const walkClip = e.isTank ? tankWalkClip : walkAnimClip;
+    const wa = walkClip ? e.mixer.clipAction(walkClip) : null;
+    if (wa) {
+      wa.enabled = true;
+      wa.setLoop(THREE.LoopRepeat, Infinity);
+      wa.crossFadeFrom(dmg, 0.12, true);
+      wa.play();
     }
   };
   e.mixer.addEventListener('finished', onDone);
 }
 
+function shootSaiga() {
+  if (!gameRunning || !pointerLocked) return;
+  if (saigaPumping) return; // can't fire while pumping
+  if (saigaAmmo <= 0) return;
+  saigaAmmo--;
+  saigaLastShot = performance.now() / 1000;
+  updateHUD();
+  doMuzzle();
+  if (sfxSaigaFire) { const s = sfxSaigaFire.cloneNode(); s.volume = 1.0; s.play().catch(()=>{}); }
+
+  if (saigaMixer) {
+    const fireKey = Object.keys(saigaActions).find(k => k.includes('fire'));
+    const reloadKey = Object.keys(saigaActions).find(k => k.includes('reload_full'));
+    const idleKey = Object.keys(saigaActions).find(k => k.includes('idle'));
+    const fa = fireKey ? saigaActions[fireKey] : null;
+    const ra = reloadKey ? saigaActions[reloadKey] : null;
+    const ia = idleKey ? saigaActions[idleKey] : null;
+
+    // Stop everything, play fire anim
+    saigaMixer.stopAllAction();
+    if (fa) {
+      fa.reset(); fa.setLoop(THREE.LoopOnce, 1); fa.clampWhenFinished = true; fa.play();
+      const onFireDone = (ev) => {
+        if (ev.action !== fa) return;
+        saigaMixer.removeEventListener('finished', onFireDone);
+        // After fire: auto-pump (reload_full) if ammo remains
+        if (ra && saigaAmmo > 0) {
+          saigaPumping = true;
+          if (sfxSaigaReload) { const s = sfxSaigaReload.cloneNode(); s.volume = 0.85; s.play().catch(()=>{}); }
+          ra.reset(); ra.setLoop(THREE.LoopOnce, 1); ra.clampWhenFinished = true; ra.play();
+          const onPumpDone = (ev2) => {
+            if (ev2.action !== ra) return;
+            saigaMixer.removeEventListener('finished', onPumpDone);
+            saigaPumping = false;
+            if (ia) { ia.reset(); ia.setLoop(THREE.LoopRepeat, Infinity); ia.play(); }
+          };
+          saigaMixer.addEventListener('finished', onPumpDone);
+        } else {
+          // Out of ammo — just go idle
+          if (ia) { ia.reset(); ia.setLoop(THREE.LoopRepeat, Infinity); ia.play(); }
+        }
+      };
+      saigaMixer.addEventListener('finished', onFireDone);
+    }
+  }
+
+  // 5-pellet spread
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const pellets = [[0,0],[0.04,0.02],[-0.04,-0.02],[0.02,-0.03],[-0.02,0.03]];
+  let hitAny = false;
+  for (const [sx, sz] of pellets) {
+    const dir = raycaster.ray.direction.clone();
+    dir.x += (Math.random()-0.5)*sx; dir.z += (Math.random()-0.5)*sz;
+    dir.normalize();
+    let best = null, bd = Infinity;
+    for (const e of waveEnemies) {
+      if (e.dead) continue;
+      const d = new THREE.Ray(raycaster.ray.origin, dir).distanceToPoint(e.pos);
+      const along = raycaster.ray.origin.distanceTo(e.pos);
+      if (d < 0.9 && along < bd && along > 0.3) { bd = along; best = e; }
+    }
+    if (best && !hitAny) {
+      hitAny = true;
+      best.hp -= 3; showHM();
+      const ft = best.body || best.mesh;
+      ft.traverse(c => {
+        if (c.isMesh && c.material) {
+          c.material.emissive = new THREE.Color(.5,0,0);
+          setTimeout(() => { if (c.material) c.material.emissive.set(0,0,0); }, 130);
+        }
+      });
+      playDamageAnim(best);
+      if (best.hp <= 0) killEnemy(best);
+    }
+    if (bossData && !bossData.dead) {
+      const bc = bossData.pos.clone().add(new THREE.Vector3(0,1.5,0));
+      const bd2 = new THREE.Ray(raycaster.ray.origin, dir).distanceToPoint(bc);
+      const along = raycaster.ray.origin.distanceTo(bc);
+      if (bd2 < 1.5 && along > 0.3) { showHM(); damageBoss(3); }
+    }
+  }
+}
+
+
 function shoot() {
   if (activeWeapon === 'fists') { doPunch(); return; }
+  if (activeWeapon === 'saiga') { shootSaiga(); return; }
   // Semi-auto: enforce cooldown between shots
   const now_s = performance.now() / 1000;
   if (now_s - lastShotTime < SHOT_COOLDOWN) return;
@@ -1974,10 +2210,35 @@ function shoot() {
           setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
         }
       });
-      damageBoss(5);
+      damageBoss(1);
     }
   }
   if (ammo === 0 && totalAmmo > 0) setTimeout(startReload, 320);
+}
+
+function startSaigaReload() {
+  if (saigaAmmo >= saigaMaxAmmo || saigaPumping) return;
+  if (sfxSaigaReload) { const s = sfxSaigaReload.cloneNode(); s.volume = 0.9; s.play().catch(()=>{}); }
+  if (saigaMixer) {
+    const reloadKey = Object.keys(saigaActions).find(k => k.includes('reload_full'));
+    const idleKey = Object.keys(saigaActions).find(k => k.includes('idle'));
+    const ra = reloadKey ? saigaActions[reloadKey] : null;
+    const ia = idleKey ? saigaActions[idleKey] : null;
+    if (ra) {
+      saigaPumping = true;
+      saigaMixer.stopAllAction();
+      ra.reset(); ra.setLoop(THREE.LoopOnce, 1); ra.clampWhenFinished = true; ra.play();
+      const onDone = (ev) => {
+        if (ev.action !== ra) return;
+        saigaMixer.removeEventListener('finished', onDone);
+        saigaAmmo = saigaMaxAmmo;
+        saigaPumping = false;
+        updateHUD();
+        if (ia) { ia.reset(); ia.setLoop(THREE.LoopRepeat, Infinity); ia.play(); }
+      };
+      saigaMixer.addEventListener('finished', onDone);
+    }
+  }
 }
 
 function startReload() {
@@ -2356,19 +2617,22 @@ function updateBossAI(dt, elapsed, pp) {
   if (bossData.isSprinting) {
     const CHARGE_DIST = 2.5; // Close enough to slam
 
-    // Use locked target so boss always reaches destination regardless of player movement
-    const tx = bossData.sprintTarget ? bossData.sprintTarget.x : pp.x;
-    const tz = bossData.sprintTarget ? bossData.sprintTarget.z : pp.z;
+    // Track player in real time during charge — boss always follows player movement
+    const tx = pp.x;
+    const tz = pp.z;
     const tdx = tx - bossData.pos.x;
     const tdz = tz - bossData.pos.z;
     const tdist = Math.sqrt(tdx*tdx + tdz*tdz);
 
     if (tdist > 0.8) {
-      // Charge toward locked target
-      const step = Math.min(bossData.speed * dt, tdist);
+      // Charge at higher speed, ignore all obstacles
+      const chargeSpeed = (bossData.originalSpeed || bossData.speed) * 3.5;
+      const step = chargeSpeed * dt;
       bossData.pos.x += (tdx / tdist) * step;
       bossData.pos.z += (tdz / tdist) * step;
       bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
+      // Always face player during charge
+      bossData.mesh.rotation.y = Math.atan2(tdx, tdz);
       // Screen shake when close to player
       if (dist < 6) {
         dvigEl.style.opacity = 0.3;
@@ -2380,7 +2644,8 @@ function updateBossAI(dt, elapsed, pp) {
       bossData.isSprinting = false;
       bossData.speed = bossData.originalSpeed || 2.8 + wave * 0.15;
 
-      // Push player back HARD
+      // Push player back HARD — grant 10s noclip so they can't get stuck
+      playerNoclipUntil = performance.now() / 1000 + 10;
       const pushDir = toP.clone().normalize();
       playerPos.x += pushDir.x * 8;
       playerPos.z += pushDir.z * 8;
@@ -2509,25 +2774,42 @@ function killEnemy(e) {
   score += 200 * wave; waveLeft--;
   updateHUD();
 
-  if (e.mixer && deathAnimClip) {
-    // Stop all current actions (walk etc.) immediately
-    e.mixer.stopAllAction();
-    // Create death action -- clipAction matches tracks to bones by name
-    const deathAction = e.mixer.clipAction(deathAnimClip);
-    deathAction.reset();
-    deathAction.setLoop(THREE.LoopOnce, 1);
-    deathAction.clampWhenFinished = true;
-    deathAction.enabled = true;
-    deathAction.weight = 1;
-    deathAction.timeScale = 1.0;
-    deathAction.play();
-    // Keep updating this mixer until death anim finishes
-    e.dyingUntil = performance.now() / 1000 + deathAnimClip.duration + 0.5;
-    setTimeout(() => scene.remove(e.mesh), (deathAnimClip.duration * 1000) + 500);
+  if (e.isTank) {
+    if (e.mixer) e.mixer.stopAllAction();
+    // Pin pivot to ground before playing anim
+    e.mesh.position.y = 0;
+    if (e.body) e.body.position.y = e.footY;
+    if (e.mixer && tankDeathClip) {
+      const deathAction = e.mixer.clipAction(tankDeathClip);
+      deathAction.reset();
+      deathAction.setLoop(THREE.LoopOnce, 1);
+      deathAction.clampWhenFinished = true;
+      deathAction.play();
+      const deathDur = tankDeathClip.duration;
+      e.dyingUntil = performance.now() / 1000 + deathDur + 0.5;
+      setTimeout(() => scene.remove(e.mesh), deathDur * 1000 + 500);
+    } else {
+      e.dyingUntil = null;
+      setTimeout(() => scene.remove(e.mesh), 2000);
+    }
   } else {
-    // Fallback: tip over if no death anim
-    e.mesh.rotation.x = Math.PI / 2.2;
-    setTimeout(() => scene.remove(e.mesh), 900);
+    // Zombie: play death animation normally
+    if (e.mixer && deathAnimClip) {
+      e.mixer.stopAllAction();
+      const deathAction = e.mixer.clipAction(deathAnimClip);
+      deathAction.reset();
+      deathAction.setLoop(THREE.LoopOnce, 1);
+      deathAction.clampWhenFinished = true;
+      deathAction.enabled = true;
+      deathAction.weight = 1;
+      deathAction.timeScale = 1.0;
+      deathAction.play();
+      e.dyingUntil = performance.now() / 1000 + deathAnimClip.duration + 0.5;
+      setTimeout(() => scene.remove(e.mesh), (deathAnimClip.duration * 1000) + 500);
+    } else {
+      e.mesh.rotation.x = Math.PI / 2.2;
+      setTimeout(() => scene.remove(e.mesh), 900);
+    }
   }
 
   if (waveLeft <= 0 && waveSpawned >= waveTotal) nextWave();
@@ -2565,12 +2847,14 @@ function updateHUD() {
   document.getElementById('hfill').style.width = Math.max(0,health)+'%';
   document.getElementById('svs').textContent   = score;
   document.getElementById('svw').textContent   = wave;
-  document.getElementById('anum').textContent  = reloading ? '--' : ammo;
+  const isSaiga = activeWeapon === 'saiga';
+  const dispAmmo = isSaiga ? saigaAmmo : (reloading ? '--' : ammo);
+  const dispTotal = isSaiga ? ('/ ' + saigaMaxAmmo) : ('/ ' + totalAmmo);
+  document.getElementById('anum').textContent = dispAmmo;
   const totalEl = document.getElementById('atotal');
-  if (totalEl) totalEl.textContent = '/ ' + totalAmmo;
-  // Flash red when out of ammo
+  if (totalEl) totalEl.textContent = dispTotal;
   const anumEl = document.getElementById('anum');
-  if (anumEl) anumEl.style.color = (ammo === 0 && activeWeapon === 'revolver') ? '#ff4444' : '#aaffbb';
+  if (anumEl) anumEl.style.color = (isSaiga ? saigaAmmo === 0 : ammo === 0) ? '#ff4444' : '#aaffbb';
 }
 
 // =====================================================
@@ -2698,7 +2982,7 @@ function loop() {
 
   // Gun bob + recoil spring
   gunPivot.rotation.x += (0-gunPivot.rotation.x) * .13;
-  if (revolverModel) {
+  if (revolverModel && activeWeapon === 'revolver') {
   // SLIGHTLY RIGHT POSITION - classic FPS offset
   gunPivot.position.x  = 0.12 + Math.sin(bobTime*.5)*bobAmt*.012;  // Base offset 0.12
   gunPivot.position.y  = -0.45 + Math.sin(bobTime)*bobAmt*.018 + Math.sin(elapsed*.7)*.003;
@@ -2777,6 +3061,32 @@ function loop() {
       console.log("Added grip cap to cover open end");
     }
   }
+  } // end if revolverModel
+  if (saigaModel && activeWeapon === 'saiga') {
+    // =============================================
+    // POSITION ADJUSTMENT SETTINGS - Adjust these values:
+    // =============================================
+    // X: Left/Right (positive = right, negative = left)
+    // Y: Up/Down (positive = up, negative = down)
+    // Z: Forward/Back (negative = closer to camera, positive = further away)
+    // =============================================
+    
+    saigaPivot.position.x = 0.03+ Math.sin(bobTime * 0.5) * bobAmt * 0.010;  // ← ADJUST THIS (0.08-0.15)
+    saigaPivot.position.y = -0.40 + Math.sin(bobTime) * bobAmt * 0.015 + Math.sin(elapsed * 0.7) * 0.0025;  // ← ADJUST THIS (-0.45 to -0.30)
+    saigaPivot.position.z = -0.01;  // ← ADJUST THIS (-0.20 to -0.10)
+    
+    // Rotation settings
+    saigaPivot.rotation.set(0.18, Math.PI, 0.12);  // ← Fine-tune if needed
+    
+    // =============================================
+    // SCALE ADJUSTMENT - Change this value to make gun smaller/larger
+    // =============================================
+    if (saigaModel) {
+        saigaModel.scale.setScalar(0.55);  // ← ADJUST THIS (0.6 = smaller, 1.0 = larger)
+        
+        // Update animation mixer if it exists
+        if (saigaMixer) saigaMixer.update(dt);
+    }
 }
   if (fistsGroup && fistsGroup.visible) {
     fistsGroup.position.x = Math.sin(bobTime*.5)*bobAmt*.04;
@@ -2817,6 +3127,7 @@ function loop() {
 
   // -- Update animation mixers --
   if (revolverMixer) revolverMixer.update(dt);
+  if (saigaMixer && activeWeapon === 'saiga') saigaMixer.update(dt);
   if (fistsMixer) fistsMixer.update(dt);
   const now_s = performance.now() / 1000;
   for (const e of waveEnemies) {
@@ -2824,6 +3135,11 @@ function loop() {
     // Always update: alive, attacking, or dying (until death anim finishes)
     if (!e.dead || (e.dyingUntil && now_s < e.dyingUntil)) {
       e.mixer.update(dt);
+      // After every mixer update, force tank back to ground
+      if (e.dead && e.isTank) {
+        e.mesh.position.y = 0;
+        if (e.body) e.body.position.y = e.footY; // restore correct foot offset, not 0
+      }
     }
   }
 
@@ -2856,8 +3172,9 @@ function loop() {
         const step = Math.min(e.speed * dt, maxStep);
         moveE(e.pos, _toP.clone().normalize().multiplyScalar(step));
         // Resume walk anim — ensure it's running whenever zombie is moving
-        if (e.mixer && walkAnimClip && !e.attackState && !e.isHit) {
-          const wa = e.mixer.clipAction(walkAnimClip);
+        const activeWalkClip = e.isTank ? tankWalkClip : walkAnimClip;
+        if (e.mixer && activeWalkClip && !e.attackState && !e.isHit) {
+          const wa = e.mixer.clipAction(activeWalkClip);
           if (!wa.isRunning()) {
             wa.enabled = true;
             wa.setLoop(THREE.LoopRepeat, Infinity);
@@ -2876,7 +3193,7 @@ function loop() {
           // Strict alternating loop: attack1 → attack2 → attack1 → ...
           // e.attackIndex tracks which clip fires next (initialised to 0 in createEnemy)
           if (e.attackIndex === undefined) e.attackIndex = 0;
-          const clips = [attack1Clip, attack2Clip].filter(Boolean);
+          const clips = (e.isTank ? [tankAtk1Clip, tankAtk2Clip] : [attack1Clip, attack2Clip]).filter(Boolean);
           const clip  = clips.length ? clips[e.attackIndex % clips.length] : null;
           if (e.mixer && clip) {
             const prevClip  = clips.length > 1 ? clips[(e.attackIndex + clips.length - 1) % clips.length] : null;
@@ -2922,7 +3239,8 @@ function loop() {
       } else {
         // Player moved out of attack range — stop any active attack anim cleanly
         if (e.attackState) {
-          const wa = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
+          const wc = e.isTank ? tankWalkClip : walkAnimClip;
+          const wa = wc ? e.mixer.clipAction(wc) : null;
           const aa = e.attackState;
           e.attackState = null;
           e.attackT = 0;
