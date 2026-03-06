@@ -1808,6 +1808,7 @@ function createEnemy() {
     roamDir: new THREE.Vector3(Math.random()-.5, 0, Math.random()-.5).normalize(),
     roamT: 0, attackT: 0, dead: false, tier,
     attackState: null,
+    isHit: false,
   });
 }
 
@@ -1874,7 +1875,7 @@ function doPunch() {
           setTimeout(() => { if (c.material) c.material.emissive.copy(origEmissive); }, 120);
         }
       });
-      damageBoss(2);
+      damageBoss(10);
     }
   }
 }
@@ -1884,6 +1885,7 @@ function playDamageAnim(e) {
   // Stop all current actions — hit reaction interrupts everything
   e.mixer.stopAllAction();
   if (e.attackState) e.attackState = null; // cancel attack mid-swing
+  e.isHit = true; // freeze movement while reacting
   const dmg = e.mixer.clipAction(damageAnimClip);
   dmg.reset();
   dmg.setLoop(THREE.LoopOnce, 1);
@@ -1895,6 +1897,7 @@ function playDamageAnim(e) {
     if (ev.action !== dmg) return;
     e.mixer.removeEventListener('finished', onDone);
     if (e.dead) return;
+    e.isHit = false; // unfreeze
     const walk = walkAnimClip ? e.mixer.clipAction(walkAnimClip) : null;
     if (walk) {
       walk.enabled = true;
@@ -1953,25 +1956,7 @@ function shoot() {
         setTimeout(() => { if (c.material) c.material.emissive.set(0,0,0); }, 130);
       }
     });
-    // Play damage react anim
-    if (best.mixer && damageAnimClip && !best.dead) {
-      const dmgAction = best.mixer.clipAction(damageAnimClip);
-      const walkAction = walkAnimClip ? best.mixer.clipAction(walkAnimClip) : null;
-      dmgAction.reset();
-      dmgAction.setLoop(THREE.LoopOnce, 1);
-      dmgAction.clampWhenFinished = true;
-      if (walkAction) dmgAction.crossFadeFrom(walkAction, 0.05, true);
-      dmgAction.play();
-      const onDmgDone = (ev) => {
-        if (ev.action !== dmgAction) return;
-        best.mixer.removeEventListener('finished', onDmgDone);
-        if (!best.dead && walkAction) {
-          walkAction.reset(); walkAction.crossFadeFrom(dmgAction, 0.1, true);
-          walkAction.setLoop(THREE.LoopRepeat, Infinity); walkAction.play();
-        }
-      };
-      best.mixer.addEventListener('finished', onDmgDone);
-    }
+    playDamageAnim(best);
     if (best.hp <= 0) killEnemy(best);
   }
   // Also check boss with revolver
@@ -2182,11 +2167,12 @@ function triggerBossSprint() {
 
   bossData.isSprinting = true;
   bossData.attackState = null;
-  bossData.sprintCooldown = 5.0; // Can't sprint again for 5 seconds
+  bossData.sprintCooldown = 5.0;
+  bossData.sprintTarget = playerPos.clone(); // lock target at charge start
 
   // Store original speed for later reset
   bossData.originalSpeed = bossData.speed;
-  bossData.speed = 12.0; // SUPER FAST CHARGE!
+  bossData.speed = 18.0; // SUPER FAST CHARGE!
 
   // Play sprint animation if available
   if (bossSprintClip) {
@@ -2370,21 +2356,27 @@ function updateBossAI(dt, elapsed, pp) {
   if (bossData.isSprinting) {
     const CHARGE_DIST = 2.5; // Close enough to slam
 
-    if (dist > CHARGE_DIST) {
-      // Charge forward
-      const step = Math.min(bossData.speed * dt, dist - CHARGE_DIST);
-      const bdir = toP.clone().normalize();
-      bossData.pos.x += bdir.x * step;
-      bossData.pos.z += bdir.z * step;
+    // Use locked target so boss always reaches destination regardless of player movement
+    const tx = bossData.sprintTarget ? bossData.sprintTarget.x : pp.x;
+    const tz = bossData.sprintTarget ? bossData.sprintTarget.z : pp.z;
+    const tdx = tx - bossData.pos.x;
+    const tdz = tz - bossData.pos.z;
+    const tdist = Math.sqrt(tdx*tdx + tdz*tdz);
+
+    if (tdist > 0.8) {
+      // Charge toward locked target
+      const step = Math.min(bossData.speed * dt, tdist);
+      bossData.pos.x += (tdx / tdist) * step;
+      bossData.pos.z += (tdz / tdist) * step;
       bossData.mesh.position.set(bossData.pos.x, 0, bossData.pos.z);
-      
-      // Screen shake effect when close
-      if (dist < 8) {
+      // Screen shake when close to player
+      if (dist < 6) {
         dvigEl.style.opacity = 0.3;
         setTimeout(() => dvigEl.style.opacity = 0, 100);
       }
-    } else {
-      // SLAM - reached player!
+    }
+    // Slam triggers when boss is close to the PLAYER (not just the target point)
+    if (dist < 2.5) {
       bossData.isSprinting = false;
       bossData.speed = bossData.originalSpeed || 2.8 + wave * 0.15;
 
@@ -2858,13 +2850,13 @@ function loop() {
 
     if (dist < 999) {
       // Always chase player — full map detection — once inside, never move forward again
-      if (dist > ATTACK_DIST && !e.attackState) {
+      if (dist > ATTACK_DIST && !e.attackState && !e.isHit) {
         // Clamp step so zombie never overshoots -- can move AT MOST (dist - STOP_DIST)
         const maxStep = dist - STOP_DIST;
         const step = Math.min(e.speed * dt, maxStep);
         moveE(e.pos, _toP.clone().normalize().multiplyScalar(step));
         // Resume walk anim — ensure it's running whenever zombie is moving
-        if (e.mixer && walkAnimClip && !e.attackState) {
+        if (e.mixer && walkAnimClip && !e.attackState && !e.isHit) {
           const wa = e.mixer.clipAction(walkAnimClip);
           if (!wa.isRunning()) {
             wa.enabled = true;
@@ -2880,7 +2872,7 @@ function loop() {
         if (e.attackT > 0) e.attackT -= dt;
 
         // Attack immediately when in range and cooldown is done and not mid-swing
-        if (e.attackT <= 0 && !e.attackState) {
+        if (e.attackT <= 0 && !e.attackState && !e.isHit) {
           // Strict alternating loop: attack1 → attack2 → attack1 → ...
           // e.attackIndex tracks which clip fires next (initialised to 0 in createEnemy)
           if (e.attackIndex === undefined) e.attackIndex = 0;
